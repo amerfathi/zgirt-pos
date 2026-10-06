@@ -1,0 +1,15 @@
+name = "zgirt-pos"
+compatibility_date = "2024-09-01"
+pages_build_output_dir = "./dist"
+
+# Cloudflare D1 Database Binding for ZGIRT
+[[d1_databases]]
+binding = "DB"
+database_name = "zgirt_pos_production"
+database_id = "a7308bf3-0d14-441f-97b2-16371850d5a3"
+migrations_dir = "d1/migrations"
+
+[vars]
+ENVIRONMENT = "production"
+CASH_SHIFTS_ENABLED = "true"
+AUTH_SECRET = "zgirt_tobacco_pos_super_secure_master_secret_2026_production"

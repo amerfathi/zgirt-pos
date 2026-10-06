@@ -1,73 +1,44 @@
-# ZGIRT — زقيرت
-### Independent Commercial POS, Inventory, Accounting & Wholesale Platform for Tobacco Retailers
+# براكه — نظام البيع وإدارة المتجر
 
-![License](https://img.shields.io/badge/license-Proprietary-blue.svg)
-![Version](https://img.shields.io/badge/version-1.0.0-emerald.svg)
-![Target](https://img.shields.io/badge/domain-Tobacco%20Retail%20%26%20Wholesale-amber.svg)
+المرجع الحالي بتاريخ **4 أكتوبر 2026**؛ الإصدار المنشور **2.6.14**. منتج واحد بواجهة عربية يعمل على الويب و Windows و Android ، مع حفظ محلي دائم ومزامنة مع خادم الشركة.
 
----
+## التوثيق المعتمد
 
-## 🌟 Overview
+| الموضوع | المرجع |
+|---|---|
+| البنية والتخزين والبيانات وواجهات الخادم | [البنية التقنية](docs/current/ARCHITECTURE.md) |
+| التشغيل اليومي والفروع والبيع والإعدادات | [دليل الاستخدام](docs/current/USER_GUIDE.md) |
+| المبيعات والمخزون والأرصدة والتقارير والورديات | [الدليل المحاسبي](docs/current/ACCOUNTING.md) |
+| الحفظ والمزامنة والتعارضات والاسترداد | [عقد المزامنة وسلامة البيانات](docs/current/SYNC_AND_RECOVERY.md) |
+| الهوية والصلاحيات والأسرار | [الأمان والصلاحيات](docs/current/SECURITY.md) |
+| التطوير والاختبارات والبناء والنشر والتراجع | [دليل التشغيل والنشر](docs/current/OPERATIONS.md) |
+| التغييرات من بداية المعالجة حتى الآن | [سجل الإنجاز](docs/current/CHANGE_HISTORY.md) |
+| فهرس جميع الوثائق والتقارير القديمة | [فهرس التوثيق](docs/INDEX.md) |
+| دليل الإصدار المنشور وحدود التحقق | [تقرير 2.6.14](docs/release-2.6.14-verification.md) |
+| الموانع المتبقية وتسليم المهمة | [الموانع](RELEASE_BLOCKERS.md)، [ملف التسليم](AI_HANDOFF_CURRENT.md) |
 
-**ZGIRT (زقيرت)** is a high-performance, resilient, offline-first Point of Sale, inventory management, multi-branch treasury, and wholesale accounting platform engineered specifically for **cigarette and tobacco merchants**.
+هذه الأدلة تصف الحالة الفعلية المراجعة من الشيفرة ودليل النشر، لا جميع الأفكار التي نوقشت. تقارير التدقيق القديمة محفوظة للأدلة التاريخية، وليست شهادة للحالة الحالية. عند التعارض، يُرجع إلى القسم الأحدث في سجل الموانع وتقرير الإصدار، ثم إلى الشيفرة المنشورة؛ لا تعتمد أرقام الاختبارات أو عبارات «مكتمل» في تقرير قديم.
 
-Designed with **Arabic RTL as a first-class citizen**, ZGIRT delivers:
-- **Fast Barcode & Multi-Tier POS**: Retail and Wholesale workflows with rapid packaging unit switches (Carton / Pack / Piece).
-- **Causal Synchronization Engine**: Precondition-based offline sync preventing silent last-write-wins data loss.
-- **Double-Entry Cash Drawer & Treasury Integrity**: Integer-cents financial arithmetic eliminating floating-point drift.
-- **Cross-Platform Deployments**: Modern Web/PWA, Native Windows Desktop (Electron), and Android Mobile (Capacitor).
-- **Cloudflare Serverless Backend**: Powered by Cloudflare Workers/Pages, D1 SQLite database, and R2 secure backups.
+## الوصول للإصدار
 
----
+- [الويب](https://khodar-pos.pages.dev).
+- [حزم Windows و Android 2.6.14](https://github.com/amerfathi/khodar-pos/releases/tag/v2.6.14).
+- مصدر الحزم: `f850a7679e7bdc1b57ebfb6ebc39268be1b0c778`. تغييرات التوثيق اللاحقة لا تغيّر تلك الحزم.
+- تحديثات Windows تستخدم بيانًا موقّعًا بمفتاح Ed25519 مثبّت. المثبّت لا يحمل شهادة Windows Authenticode ؛ قد تظهر تحذيرات النظام.
 
-## 🏛️ Architecture & Packaging Hierarchy
+## البدء بالتطوير
 
-Tobacco retail operates on strict packaging hierarchies:
-```
-1 Carton (كرتونة)  =  10 Packs (بواكي / علب)  =  200 Pieces (سجائر فردي)
-```
-ZGIRT tracks physical inventory at the fundamental unit while supporting automated carton breaking, dynamic price breaks, and barcode assignment per packaging level.
+استخدم Node.js24 كما في CI ، ثم من جذر المشروع:
 
----
-
-## 🚀 Quick Start
-
-### 1. Requirements
-- Node.js >= 20.x
-- npm >= 10.x
-- Cloudflare Wrangler CLI (for backend migrations & deploys)
-
-### 2. Installation
-```bash
-git clone https://github.com/amerfathi/zgirt-pos.git
-cd zgirt-pos
-npm install
-```
-
-### 3. Development
-```bash
-# Run local Vite web application
+```sh
+npm ci
 npm run dev
-
-# Run Cloudflare D1 local worker backend
-npm run worker:dev
-
-# Run Windows Desktop (Electron)
-npm run desktop:start
 ```
 
-### 4. Automated Tests
-```bash
-npm test
-```
-All accounting, causal sync, and tenant isolation tests run with deterministic fixtures.
+للفحوصات: `npm run lint`، `npm run typecheck`، `npm test`، `npm run build`. خادم Vite وحده لا يوفر قاعدة D1 أو مصادقة الخادم؛ اقرأ دليل التشغيل قبل إعداد APIs المحلية أو الاتصال بالإنتاج.
 
----
+## حدود مهمة
 
-## 🔒 Security & Tenant Isolation
-ZGIRT operates a multi-tenant database model. All database queries, sync events, and business transactions are isolated by `tenant_id` and signed session tokens with constant-time cryptographic validation.
+الورديات وإقفال الدرج والتصاريح دون اتصال موجودة كتصميم/أساس محلي لكنها **معطلة في الإنتاج**. تسوية المالك تدعم تاريخًا كاملًا ضمن حد 2000 حدث؛ غير المدعوم يبقى محفوظًا دون تسوية تلقائية. لا توجد شهادة تحمّل 1000 مستخدم، أو رحلة مالية كاملة للـ APK الموقّع، أو اعتماد لطابعة فعلية. لا تُنشر ترحيلات قاعدة البيانات أو جميع handlers من main تلقائيًا: الإنتاج يستخدم حزمة APIs متوافقة مع مخططه الحالي.
 
----
-
-## 📄 License
-Proprietary & Confidential. All rights reserved.
+الدعم والاشتراكات والتجديد: [واتساب مالك المنصة](https://wa.me/966564982852).

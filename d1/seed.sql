@@ -1,0 +1,4 @@
+-- Intentionally empty.
+-- Production and development credentials must never be committed as seed data.
+-- Create test identities in isolated fixtures and provision the platform owner
+-- through scripts/prepare-precommercial-cleanup.cjs.

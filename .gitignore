@@ -3,34 +3,41 @@ node_modules/
 .pnp
 .pnp.js
 
-# Build Outputs
+# Production build
 dist/
-dist-electron/
+dist-matrix/
 build/
+
+# Wrangler & Cloudflare
 .wrangler/
+
+# Android build outputs & Gradle cache
+android/.gradle/
 android/app/build/
+android/build/
+android/capacitor-cordova-android-plugins/build/
+android/local.properties
+android/keystore.properties
+android/app/*.keystore
+android/app/*.jks
+.env
+.env.*
 *.apk
 *.aab
+
+# Desktop build & large installers
+dist-electron/
 *.exe
+*.dmg
+*.deb
+*.AppImage
 
-# Local Environment & Secrets
-.env
-.env.local
-.env.*.local
-*.pem
-*.key
-*.keystore
-
-# Logs & Diagnostics
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-.system_generated/
-
-# OS and Editor metadata
+# Scratch and test logs
+scratch/
+*.log
 .DS_Store
 Thumbs.db
+
+# IDE & Editor
 .vscode/
 .idea/

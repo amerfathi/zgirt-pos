@@ -1,0 +1,160 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Login uses the same indigo identity as the application. Alert colors remain semantic. */
+.braka-login [class*="bg-emerald-600"] { background-color: #434fcc; }
+.braka-login [class*="bg-emerald-50"] { background-color: #f5f6ff; }
+.braka-login [class*="border-emerald"] { border-color: #d6dcfe; }
+.braka-login [class*="text-emerald"] { color: #353ea7; }
+.braka-login [class*="focus:border-emerald"]:focus { border-color: #434fcc; }
+.braka-login [class*="focus:ring-emerald"]:focus { --tw-ring-color: rgb(67 79 204 / .2); }
+.braka-login [class*="shadow-emerald"] { --tw-shadow-color: rgb(67 79 204 / .16); }
+.braka-login [class*="bg-emerald-600"]:hover { background-color: #353ea7; }
+
+/* Workspace-only polish: deliberately excluded from printed documents. */
+@media screen {
+  .braka-workspace :is(button, input, select, textarea):focus-visible {
+    outline: 2px solid #434fcc;
+    outline-offset: 2px;
+  }
+  .braka-workspace label { line-height: 1.65; }
+}
+@media screen and (max-width: 767px) {
+  .braka-workspace main :is(button, input:not([type="checkbox"]):not([type="radio"]), select) {
+    min-height: 44px;
+    font-size: 14px;
+  }
+  .braka-workspace main label { font-size: 12px; }
+  .braka-workspace main textarea { font-size: 14px; }
+  .braka-workspace main p.text-\[10px\],
+  .braka-workspace main p.text-\[11px\] { font-size: 12px; line-height: 1.65; }
+}
+@media screen and (prefers-reduced-motion: reduce) {
+  .braka-workspace :is(button, input, select) { transition: none; }
+}
+
+/* Sale-only touch readability; desktop density and financial logic unchanged. */
+@media (max-width: 767px) {
+  .sale-screen .text-xs { font-size: 14px; line-height: 1.65; }
+  .sale-screen .text-\[10px\], .sale-screen .text-\[11px\] { font-size: 12px; line-height: 1.65; }
+  .sale-screen input, .sale-screen select, .sale-screen button { min-height: 44px; }
+  .sale-screen .text-slate-400 { color: #64748b; }
+}
+
+@layer base {
+  body {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "tnum";
+    letter-spacing: -0.015em;
+    background-color: #f8fafc;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "SF Arabic", "SF Pro", "IBM Plex Sans Arabic", "Readex Pro", system-ui, sans-serif;
+  }
+
+  input, textarea, select {
+    user-select: text !important;
+    -webkit-user-select: text !important;
+  }
+
+  /* Sleek modern scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #f8fafc;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+}
+
+/* Custom scrollbars */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* iOS & Android Safe Area Insets & Touch Optimization */
+.pb-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0.5rem));
+}
+.pt-safe {
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+}
+.pl-safe {
+  padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+}
+.pr-safe {
+  padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
+}
+.touch-action-manipulation {
+  touch-action: manipulation;
+}
+
+/* Print Handling for Thermal Receipt vs Full A4 Official Report */
+@media print {
+  /* Hide standard web UI */
+  body * {
+    visibility: hidden;
+  }
+
+  /* 1. Print Mode: Official A4 Document */
+  #printable-a4-document, #printable-a4-document * {
+    visibility: visible;
+  }
+
+  #printable-a4-document {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: white !important;
+    color: black !important;
+    font-size: 12px !important;
+    display: block !important;
+  }
+
+  /* 2. Print Mode: 80mm Thermal Receipt */
+  #thermal-receipt, #thermal-receipt * {
+    visibility: visible;
+  }
+
+  #thermal-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 3mm !important;
+    box-shadow: none !important;
+    border: none !important;
+    font-size: 11px !important;
+    display: block !important;
+  }
+
+  @page {
+    margin: 8mm 10mm;
+    size: A4 portrait;
+  }
+
+  tr {
+    page-break-inside: avoid;
+  }
+}

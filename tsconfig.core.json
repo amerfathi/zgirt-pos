@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["functions/**/*", "electron/**/*", "src/services/**/*", "src/store/**/*", "src/platform.d.ts"]
+}

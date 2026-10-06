@@ -1,0 +1,49 @@
+name: Upload verified release artifact
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Production release build run ID
+        required: true
+        type: string
+      version:
+        description: Exact version in the producing commit
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: 24 }
+      - run: node scripts/upload-verified-release.cjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_RUN_ID: ${{ inputs.run_id }}
+          RELEASE_VERSION: ${{ inputs.version }}
+  upload:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: 24 }
+      - run: node scripts/upload-verified-release.cjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_RUN_ID: ${{ inputs.run_id }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          BRAKA_UPLOAD_RELEASE_ASSET: 'true'

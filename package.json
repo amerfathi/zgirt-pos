@@ -1,27 +1,113 @@
 {
-  "name": "zgirt-pos",
-  "private": true,
-  "version": "1.0.0",
-  "description": "ZGIRT — Independent Tobacco Retail & Wholesale POS, Inventory & Accounting Platform",
-  "type": "module",
-  "workspaces": [
-    "packages/*",
-    "apps/*",
-    "workers/*"
-  ],
-  "scripts": {
-    "dev": "npm --workspace=apps/web run dev",
-    "build": "npm --workspace=packages/core run build && npm --workspace=apps/web run build",
-    "test": "node --test tests/**/*.test.mjs",
-    "test:accounting": "node --test tests/accounting-consistency.test.mjs",
-    "test:sync": "node --test tests/sync-engine.test.mjs",
-    "test:tenant": "node --test tests/tenant-isolation.test.mjs",
-    "d1:migrate:local": "wrangler d1 migrations apply zgirt_pos_production --local --config workers/api/wrangler.toml",
-    "d1:migrate:remote": "wrangler d1 migrations apply zgirt_pos_production --remote --config workers/api/wrangler.toml",
-    "deploy:worker": "wrangler deploy --config workers/api/wrangler.toml",
-    "deploy:web": "wrangler pages deploy apps/web/dist --project-name zgirt-web"
-  },
-  "devDependencies": {
-    "wrangler": "^4.148.0"
-  }
+    "name":  "zgirt-pos",
+    "private":  true,
+    "version":  "2.6.14",
+    "type":  "module",
+    "main":  "electron/main.cjs",
+    "scripts":  {
+                    "dev":  "vite",
+                    "build":  "vite build",
+                    "preview":  "vite preview",
+                    "electron:start":  "electron .",
+                    "electron:build":  "node scripts/verify-release-public-key.cjs \u0026\u0026 node scripts/build-update-helper.cjs \u0026\u0026 vite build \u0026\u0026 electron-builder --win --publish never",
+                    "release:sign-windows":  "node scripts/sign-windows-release.cjs",
+                    "legacy:prepare-reset":  "node scripts/prepare-legacy-reset.cjs",
+                    "d1:prepare-clean-state":  "node scripts/prepare-precommercial-cleanup.cjs",
+                    "test:security":  "node tests/security_regression.cjs \u0026\u0026 node --test tests/release-version.test.mjs tests/cash-feature-gate.test.mjs tests/password-crypto.test.mjs",
+                    "test:browser-atomic":  "node tests/browser-atomic.test.mjs",
+                    "test:browser-cache-recovery":  "node tests/browser-cache-recovery.test.mjs",
+                    "test:browser-crash":  "node tests/browser-atomic.test.mjs --crash",
+                    "test:browser-idb-probe":  "node tests/browser-atomic.test.mjs --idb-probe",
+                    "test:browser-idb-engine":  "node tests/browser-atomic.test.mjs --idb-engine",
+                    "test:browser-idb-migrate":  "node tests/browser-atomic.test.mjs --idb-migrate",
+                    "test:browser-app-durable":  "node tests/browser-app-durable.test.mjs",
+                    "test:accounting":  "node tests/accounting_audit_test.cjs \u0026\u0026 node tests/comprehensive_qa_suite.cjs",
+                    "test":  "npm run test:security \u0026\u0026 npm run test:integration \u0026\u0026 npm run test:conflict-review \u0026\u0026 npm run test:accounting \u0026\u0026 npm run test:update-native",
+                    "test:update-native":  "node --test tests/native-update-helper.test.cjs",
+                    "test:production-bundle":  "node --test tests/production-bundle.test.cjs",
+                    "test:conflict-review":  "node --test tests/conflict-review-ui.test.mjs tests/legacy-product-proof.test.mjs tests/review-ledger-replay.test.mjs tests/review-resolution-atomic.test.mjs",
+                    "lint":  "eslint src functions electron tests",
+                    "typecheck:core":  "tsc --project tsconfig.core.json --pretty false",
+                    "typecheck":  "tsc --project tsconfig.json --pretty false",
+                    "test:integration":  "node --test --test-concurrency=1 tests/api-integration.test.mjs tests/branch-isolation.test.mjs tests/branch-store.test.mjs tests/storage.test.mjs tests/update-security.test.cjs tests/update-installer.test.cjs tests/store-sync.test.mjs tests/store-business.test.mjs tests/store-durable.test.mjs tests/worker-atomic.test.mjs tests/atomic-store.test.mjs tests/backup-scheduler.test.mjs tests/backup-validation.test.mjs tests/sync-durable.test.mjs tests/financial-ui-await.test.mjs tests/desktop-update-ui.test.mjs tests/accounting-reconciliation.test.mjs tests/settings-sync-status.test.mjs tests/precommercial-cleanup.test.cjs tests/invoice-identity.test.mjs tests/cash-shift-engine.test.mjs tests/cash-movement.test.mjs tests/cash-shift-durable.test.mjs tests/offline-shift-grant-policy.test.mjs tests/cash-drawer-journal.test.mjs tests/offline-grant-signature.test.mjs tests/offline-unlock.test.mjs tests/offline-grant-enrollment.test.mjs tests/date-timezone.test.mjs tests/cash-shift-hooks.test.mjs tests/offline-session-hook.test.mjs"
+                },
+    "build":  {
+                  "appId":  "com.zgirt.pos",
+                  "productName":  "زقيرت - كاشير التبغ والجملة",
+                  "directories":  {
+                                      "output":  "dist-electron"
+                                  },
+                  "files":  [
+                                "dist/**/*",
+                                "electron/**/*",
+                                "!node_modules/**/*"
+                            ],
+                  "asar":  true,
+                  "extraResources":  [
+                                         {
+                                             "from":  "build/Braka.UpdateHelper.exe",
+                                             "to":  "Braka.UpdateHelper.exe"
+                                         }
+                                     ],
+                  "win":  {
+                              "target":  "nsis",
+                              "icon":  "electron/icon.ico"
+                          },
+                  "nsis":  {
+                               "oneClick":  false,
+                               "allowToChangeInstallationDirectory":  true,
+                               "createDesktopShortcut":  true,
+                               "createStartMenuShortcut":  true,
+                               "deleteAppDataOnUninstall":  false,
+                               "include":  "electron/installer.nsh",
+                               "installerIcon":  "electron/icon.ico",
+                               "uninstallerIcon":  "electron/icon.ico",
+                               "installerSidebar":  "electron/installerSidebar.bmp",
+                               "uninstallerSidebar":  "electron/installerSidebar.bmp",
+                               "installerHeader":  "electron/installerHeader.bmp",
+                               "installerLanguages":  [
+                                                          "ar_SA",
+                                                          "en_US"
+                                                      ],
+                               "shortcutName":  "زقيرت - كاشير ومحاسبة التبغ",
+                               "artifactName":  "ZgirtPOS-Setup.exe"
+                           }
+              },
+    "dependencies":  {
+                         "@capacitor/android":  "^8.5.2",
+                         "@capacitor/app":  "^8.1.1",
+                         "@capacitor/cli":  "^8.5.2",
+                         "@capacitor/core":  "^8.5.2",
+                         "bcryptjs":  "^3.0.3",
+                         "clsx":  "^2.1.1",
+                         "framer-motion":  "^13.2.0",
+                         "lucide-react":  "^0.475.0",
+                         "react":  "^18.3.1",
+                         "react-dom":  "^18.3.1",
+                         "tailwind-merge":  "^3.0.1"
+                     },
+    "devDependencies":  {
+                            "@cloudflare/workers-types":  "^5.20260921.1",
+                            "@eslint/js":  "^10.0.1",
+                            "@types/react":  "^18.3.31",
+                            "@types/react-dom":  "^18.3.7",
+                            "@vitejs/plugin-react":  "^4.3.4",
+                            "autoprefixer":  "^10.4.20",
+                            "electron":  "^44.3.0",
+                            "electron-builder":  "^26.15.3",
+                            "eslint":  "^10.11.0",
+                            "globals":  "^17.12.0",
+                            "miniflare":  "^5.20260921.0-alpha",
+                            "postcss":  "^8.5.1",
+                            "puppeteer-core":  "^25.11.0",
+                            "react-test-renderer":  "^18.3.1",
+                            "tailwindcss":  "^3.4.17",
+                            "typescript":  "^7.0.2",
+                            "vite":  "^6.1.0"
+                        },
+    "overrides":  {
+                      "xcode":  {
+                                    "uuid":  "^11.1.1"
+                                }
+                  }
 }

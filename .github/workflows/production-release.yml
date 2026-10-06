@@ -1,0 +1,167 @@
+name: Production release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver matching package.json (for example 2.6.5)
+        required: true
+        type: string
+      publish:
+        description: Publish GitHub assets and D1 update metadata after both signed builds pass
+        required: true
+        default: false
+        type: boolean
+      publish_metadata:
+        description: Publish D1 metadata from GitHub (disable when publishing it through Wrangler OAuth)
+        required: true
+        default: true
+        type: boolean
+      android_staging_version_code:
+        description: Nonzero Android versionCode for a non-publishing upgrade test only
+        required: true
+        default: '0'
+        type: string
+      windows_staging_version:
+        description: Higher semver for a non-publishing Windows upgrade test only
+        required: true
+        default: '0'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:production-bundle
+
+  android:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '21' }
+      - run: npm ci
+      - name: Verify requested version
+        run: node -e "if(require('./package.json').version!==process.env.VERSION||!/^(0|[1-9][0-9]*)$/.test(process.env.STAGING_CODE)||(process.env.PUBLISH==='true'&&process.env.STAGING_CODE!=='0'))process.exit(1)"
+        env:
+          VERSION: "${{ inputs.version }}"
+          STAGING_CODE: "${{ inputs.android_staging_version_code }}"
+          PUBLISH: "${{ inputs.publish }}"
+      - run: npm run build && npx cap sync android
+      - name: Restore Android signing identity
+        shell: bash
+        env:
+          KEYSTORE_B64: "${{ secrets.ANDROID_KEYSTORE_BASE64 }}"
+          STORE_PASSWORD: "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+          KEY_ALIAS: "${{ secrets.ANDROID_KEY_ALIAS }}"
+          KEY_PASSWORD: "${{ secrets.ANDROID_KEY_PASSWORD }}"
+        run: |
+          test -n "$KEYSTORE_B64" && test -n "$STORE_PASSWORD" && test -n "$KEY_ALIAS" && test -n "$KEY_PASSWORD"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > android/release.keystore
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$GITHUB_WORKSPACE/android/release.keystore" "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/keystore.properties
+      - name: Build signed direct-distribution APK
+        working-directory: android
+        shell: bash
+        env: { STAGING_CODE: "${{ inputs.android_staging_version_code }}" }
+        run: |
+          if [ "$STAGING_CODE" = "0" ]; then
+            bash ./gradlew assembleRelease
+          else
+            bash ./gradlew assembleRelease -PbrakaVersionCode="$STAGING_CODE"
+          fi
+      - run: cp android/app/build/outputs/apk/release/app-release.apk Brraka-Android.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: android-release, path: Brraka-Android.apk, if-no-files-found: error }
+
+  windows:
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - name: Verify requested version
+        shell: pwsh
+        env:
+          VERSION: "${{ inputs.version }}"
+          STAGING_VERSION: "${{ inputs.windows_staging_version }}"
+          PUBLISH: "${{ inputs.publish }}"
+        run: |
+          if ((Get-Content package.json | ConvertFrom-Json).version -ne $env:VERSION) { exit 1 }
+          if ($env:STAGING_VERSION -ne '0' -and ($env:STAGING_VERSION -notmatch '^\d+\.\d+\.\d+$' -or $env:PUBLISH -eq 'true')) { exit 1 }
+      - name: Restore encrypted updater signing key
+        shell: pwsh
+        env:
+          PRIVATE_KEY: "${{ secrets.BRRAKA_RELEASE_PRIVATE_KEY_PEM }}"
+        run: |
+          if (-not $env:PRIVATE_KEY) { throw 'Updater signing key is missing' }
+          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'release-private-key.pem'), $env:PRIVATE_KEY)
+      - name: Build Windows installer
+        shell: pwsh
+        env: { STAGING_VERSION: "${{ inputs.windows_staging_version }}" }
+        run: |
+          if ($env:STAGING_VERSION -ne '0') {
+            node scripts/verify-release-public-key.cjs
+            node scripts/build-update-helper.cjs
+            npm run build
+            npx electron-builder --win --publish never --config.extraMetadata.version=$env:STAGING_VERSION
+          } else {
+            npm run electron:build
+          }
+      - name: Sign update manifest
+        shell: pwsh
+        env:
+          BRRAKA_RELEASE_PRIVATE_KEY_FILE: "${{ runner.temp }}/release-private-key.pem"
+          BRRAKA_RELEASE_PRIVATE_KEY_PASSPHRASE: "${{ secrets.BRRAKA_RELEASE_PRIVATE_KEY_PASSPHRASE }}"
+          STAGING_VERSION: "${{ inputs.windows_staging_version }}"
+          RELEASE_VERSION: "${{ inputs.version }}"
+        run: |
+          if ($env:STAGING_VERSION -ne '0') { $env:RELEASE_VERSION = $env:STAGING_VERSION }
+          npm run release:sign-windows -- $env:RELEASE_VERSION 'dist-electron\KhodarPOS-Setup.exe' 'windows-manifest.json'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            dist-electron/KhodarPOS-Setup.exe
+            windows-manifest.json
+          if-no-files-found: error
+
+  publish:
+    if: ${{ inputs.publish }}
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - uses: actions/download-artifact@v4
+        with: { name: android-release, path: release }
+      - uses: actions/download-artifact@v4
+        with: { name: windows-release, path: release }
+      - name: Publish immutable GitHub release assets
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release create "v${{ inputs.version }}" release/Brraka-Android.apk release/dist-electron/KhodarPOS-Setup.exe release/windows-manifest.json --title "BRAKA v${{ inputs.version }}" --generate-notes --target "$GITHUB_SHA"
+      - name: Publish signed release metadata to D1
+        if: ${{ inputs.publish_metadata }}
+        env:
+          CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}"
+          CLOUDFLARE_ACCOUNT_ID: "${{ vars.CLOUDFLARE_ACCOUNT_ID }}"
+          CLOUDFLARE_D1_DATABASE_ID: bf2fbfa3-eb13-4687-ac97-b17740c300de
+        run: |
+          node scripts/publish-release-d1.cjs android '${{ inputs.version }}' release/Brraka-Android.apk
+          node scripts/publish-release-d1.cjs windows '${{ inputs.version }}' release/dist-electron/KhodarPOS-Setup.exe release/windows-manifest.json

@@ -1,0 +1,26 @@
+{
+  "name": "براكه | منظومة كاشير ومحاسبة سحابية",
+  "short_name": "براكه",
+  "description": "منظومة براكه لإدارة المبيعات والموازين والمخزون والحسابات السحابية",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#171221",
+  "theme_color": "#171221",
+  "orientation": "portrait-primary",
+  "dir": "rtl",
+  "lang": "ar",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
