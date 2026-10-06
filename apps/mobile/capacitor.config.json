@@ -1,0 +1,8 @@
+{
+  "appId": "com.zgirt.pos",
+  "appName": "زقيرت — ZGIRT POS",
+  "webDir": "../../apps/web/dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

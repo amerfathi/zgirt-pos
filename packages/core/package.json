@@ -1,0 +1,7 @@
+{
+  "name": "@zgirt/core",
+  "version": "1.0.0",
+  "description": "ZGIRT Tobacco POS Core Business Logic & Mathematical Engines",
+  "main": "src/index.js",
+  "type": "module"
+}

@@ -1,0 +1,35 @@
+name: ZGIRT CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Monorepo Dependencies
+        run: npm ci || npm install
+
+      - name: Execute Domain & Accounting Consistency Tests
+        run: npm run test:accounting
+
+      - name: Execute Causal Sync & Conflict Policy Tests
+        run: npm run test:sync
+
+      - name: Execute Multi-Tenant Isolation Tests
+        run: npm run test:tenant
+
+      - name: Verify Web Production Build
+        run: npm --workspace=apps/web run build

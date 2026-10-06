@@ -1,0 +1,27 @@
+{
+  "name": "zgirt-pos",
+  "private": true,
+  "version": "1.0.0",
+  "description": "ZGIRT — Independent Tobacco Retail & Wholesale POS, Inventory & Accounting Platform",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "workers/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace=apps/web run dev",
+    "build": "npm --workspace=packages/core run build && npm --workspace=apps/web run build",
+    "test": "node --test tests/**/*.test.mjs",
+    "test:accounting": "node --test tests/accounting-consistency.test.mjs",
+    "test:sync": "node --test tests/sync-engine.test.mjs",
+    "test:tenant": "node --test tests/tenant-isolation.test.mjs",
+    "d1:migrate:local": "wrangler d1 migrations apply zgirt_pos_production --local --config workers/api/wrangler.toml",
+    "d1:migrate:remote": "wrangler d1 migrations apply zgirt_pos_production --remote --config workers/api/wrangler.toml",
+    "deploy:worker": "wrangler deploy --config workers/api/wrangler.toml",
+    "deploy:web": "wrangler pages deploy apps/web/dist --project-name zgirt-web"
+  },
+  "devDependencies": {
+    "wrangler": "^4.148.0"
+  }
+}

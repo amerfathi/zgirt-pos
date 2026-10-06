@@ -1,0 +1,12 @@
+{
+  "name": "@zgirt/desktop",
+  "version": "1.0.0",
+  "description": "ZGIRT Windows Desktop Distribution",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^44.3.0"
+  }
+}
