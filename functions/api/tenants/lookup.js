@@ -1,4 +1,4 @@
-/** Authentication endpoint. Store/user discovery is intentionally not exposed. */
+﻿/** Authentication endpoint. Store/user discovery is intentionally not exposed. */
 import { badRequest, json, options, readJson } from '../../_lib/http.js';
 import { createSession } from '../../_lib/auth.js';
 import { verifyPassword } from '../../_lib/passwords.js';
@@ -71,3 +71,5 @@ export async function onRequestPost({ request, env }) {
     return json({ success: false, error: 'Authentication failed' }, 500);
   }
 }
+
+
