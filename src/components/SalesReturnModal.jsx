@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { 
   X, RotateCcw, AlertCircle, ShieldCheck, Check, 
-  Package, DollarSign, ArrowDownLeft, Scale, Info
+  Package, DollarSign, ArrowDownLeft, Info, Layers
 } from 'lucide-react';
-import { formatCurrency, formatWeight } from '../utils/formatters';
+import { formatCurrency } from '../utils/formatters';
 import { displayInvoiceNumber } from '../services/invoiceIdentity';
 
 export default function SalesReturnModal({ invoice, store, onClose, onSuccess }) {
@@ -15,21 +15,52 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
   const customerDebt = customer ? Number(customer.balance || 0) : 0;
   const invoiceHasDebt = Number(invoice.remainingDebt || 0) > 0 || customerDebt > 0;
 
-  // Local state for each item's return quantity
+  // Local state for each line item's tobacco unit return quantity
   const [returnItemsState, setReturnItemsState] = useState(() => {
     return (invoice.items || []).map(it => {
-      const soldWeight = Number(it.netWeight || it.grossWeight || 0);
-      const alreadyReturned = Number(it.returnedWeight || 0);
-      const maxAvailable = Math.max(0, Math.round((soldWeight - alreadyReturned) * 100) / 100);
+      // Base ledger unit is packs (in netWeight or packsCount or quantity)
+      const soldPacks = Number(it.packsCount ?? it.netWeight ?? it.grossWeight ?? it.quantity ?? 0);
+      const alreadyReturnedPacks = Number(it.returnedWeight || 0);
+      const maxAvailablePacks = Math.max(0, Math.round((soldPacks - alreadyReturnedPacks) * 100) / 100);
+      
+      const unitType = it.unitType || (it.unit === 'كرتونة' ? 'carton' : it.unit === 'سيجارة' || it.unit === 'حبة' ? 'piece' : 'pack');
+      const unitName = it.unitName || it.unit || (unitType === 'carton' ? 'كرتونة' : unitType === 'piece' ? 'سيجارة' : 'علبة');
+      const packsPerCarton = Number(it.packsPerCarton || 10);
+      const unitsPerPack = Number(it.unitsPerPack || 20);
+
+      // Historical unit price locked on invoice
+      // Notice: pricePerKg in invoice line item is locked price per pack!
+      const historicalPricePerPack = Number(it.pricePerKg ?? (it.unitPrice && unitType === 'pack' ? it.unitPrice : 0));
+      const lockedUnitPrice = Number(it.unitPrice ?? historicalPricePerPack);
+
+      // Sold quantity in original sold unit
+      const soldQuantity = Number(it.quantity ?? soldPacks);
+      // Already returned in original sold unit:
+      let alreadyReturnedUnits = alreadyReturnedPacks;
+      let maxAvailableUnits = maxAvailablePacks;
+      if (unitType === 'carton' && packsPerCarton > 0) {
+        alreadyReturnedUnits = Math.round((alreadyReturnedPacks / packsPerCarton) * 100) / 100;
+        maxAvailableUnits = Math.round((maxAvailablePacks / packsPerCarton) * 100) / 100;
+      } else if (unitType === 'piece' && unitsPerPack > 0) {
+        alreadyReturnedUnits = Math.round(alreadyReturnedPacks * unitsPerPack);
+        maxAvailableUnits = Math.round(maxAvailablePacks * unitsPerPack);
+      }
+
       return {
         productId: it.productId,
         name: it.name,
-        unit: it.unit || 'صندوق',
-        soldWeight,
-        alreadyReturned,
-        maxAvailable,
-        originalPricePerKg: Number(it.pricePerKg || 0),
-        returnedWeight: '',
+        unitType,
+        unitName,
+        packsPerCarton,
+        unitsPerPack,
+        soldQuantity,
+        soldPacks,
+        alreadyReturnedPacks,
+        maxAvailablePacks,
+        maxAvailableUnits,
+        originalPricePerPack: historicalPricePerPack,
+        lockedUnitPrice,
+        returnedUnits: '',
         reason: ''
       };
     });
@@ -44,58 +75,63 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
   const [inventoryAction, setInventoryAction] = useState('restock'); // 'restock' | 'damaged'
   const [generalNotes, setGeneralNotes] = useState('');
 
-  // Handle return quantity change for a specific item
+  // Handle return quantity change in original sold units
   const handleItemReturnChange = (index, value) => {
     setReturnItemsState(prev => prev.map((item, idx) => {
       if (idx !== index) return item;
       const numVal = parseFloat(value);
       if (isNaN(numVal) || numVal < 0) {
-        return { ...item, returnedWeight: '' };
+        return { ...item, returnedUnits: '' };
       }
-      // Cannot return more than available
-      const clamped = Math.min(numVal, item.maxAvailable);
-      return { ...item, returnedWeight: clamped };
+      const clamped = Math.min(numVal, item.maxAvailableUnits);
+      return { ...item, returnedUnits: clamped };
     }));
   };
 
   const handleReturnAllItem = (index) => {
     setReturnItemsState(prev => prev.map((item, idx) => {
       if (idx !== index) return item;
-      return { ...item, returnedWeight: item.maxAvailable };
+      return { ...item, returnedUnits: item.maxAvailableUnits };
     }));
   };
 
-  // Calculate totals strictly on original historical price!
-  const itemsToReturn = returnItemsState.filter(it => Number(it.returnedWeight || 0) > 0);
-  
-  const totalReturnWeight = itemsToReturn.reduce((sum, it) => sum + (Number(it.returnedWeight) || 0), 0);
-  
-  const totalRefundAmount = itemsToReturn.reduce((sum, it) => {
-    const wt = Number(it.returnedWeight) || 0;
-    const price = Number(it.originalPricePerKg) || 0;
-    return sum + (wt * price);
-  }, 0);
+  // Convert entered returned units to packs for ledger accounting
+  const itemsWithPacks = returnItemsState.map(it => {
+    const enteredUnits = Number(it.returnedUnits || 0);
+    let packs = enteredUnits;
+    if (it.unitType === 'carton') {
+      packs = Math.round(enteredUnits * it.packsPerCarton * 100) / 100;
+    } else if (it.unitType === 'piece' && it.unitsPerPack > 0) {
+      packs = Math.round((enteredUnits / it.unitsPerPack) * 100) / 100;
+    }
+    const refund = Math.round(packs * it.originalPricePerPack * 100) / 100;
+    return { ...it, enteredUnits, returnedPacks: packs, refund };
+  });
 
+  const itemsToReturn = itemsWithPacks.filter(it => it.enteredUnits > 0);
+  const totalReturnPacks = itemsToReturn.reduce((sum, it) => sum + it.returnedPacks, 0);
+  const totalRefundAmount = itemsToReturn.reduce((sum, it) => sum + it.refund, 0);
   const roundedTotalRefund = Math.round(totalRefundAmount * 100) / 100;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isSaving) return;
     if (itemsToReturn.length === 0 || roundedTotalRefund <= 0) {
-      alert('يرجى تحديد وزن الصنف المراد إرجاعه أولاً');
+      alert('يرجى تحديد كمية الصنف المراد إرجاعه أولاً');
       return;
     }
 
     setIsSaving(true);
     try {
+      // Map packs to returnedWeight alias to strictly satisfy businessEffects & atomicStore validation
       const newReturn = await recordSalesReturn({
         invoiceId: invoice.id,
         returnedItems: itemsToReturn.map(it => ({
           productId: it.productId,
           name: it.name,
-          unit: it.unit,
-          originalPricePerKg: it.originalPricePerKg,
-          returnedWeight: Number(it.returnedWeight),
+          unit: it.unitName,
+          originalPricePerKg: it.originalPricePerPack,
+          returnedWeight: it.returnedPacks, // Ledger authoritative pack count
           reason: it.reason || generalNotes
         })),
         refundMethod,
@@ -123,7 +159,7 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
             </div>
             <div>
               <h3 className="font-bold text-sm sm:text-base flex items-center gap-2">
-                <span>تسجيل مردود مبيعات</span>
+                <span>تسجيل مردود مبيعات سجائر وتبغ</span>
                 <span className="text-xs bg-slate-800 text-amber-300 font-mono px-2 py-0.5 rounded-md border border-slate-700">
                   فاتورة #{displayInvoiceNumber(invoice)}
                 </span>
@@ -157,19 +193,18 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
           {/* Items Return Table */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-700 block">
-              حدد الأصناف والوزن المراد إرجاعه:
+              حدد الأصناف والكميات المراد إرجاعها:
             </label>
 
             <div className="space-y-2.5">
-              {returnItemsState.map((item, idx) => {
-                const itemRefund = Math.round((Number(item.returnedWeight || 0) * item.originalPricePerKg) * 100) / 100;
-                const isFullyReturned = item.maxAvailable <= 0;
+              {itemsWithPacks.map((item, idx) => {
+                const isFullyReturned = item.maxAvailableUnits <= 0;
 
                 return (
                   <div 
                     key={idx} 
                     className={`p-3 rounded-xl border transition-all ${
-                      Number(item.returnedWeight || 0) > 0 
+                      item.enteredUnits > 0 
                         ? 'bg-amber-50/40 border-amber-300 shadow-xs' 
                         : 'bg-slate-50/80 border-slate-200'
                     }`}
@@ -179,11 +214,11 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-sm text-slate-900">{item.name}</span>
                           <span className="text-[11px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-md border border-emerald-200">
-                            سعر البيع الأصلي: {item.originalPricePerKg} {settings.currency}/كجم
+                            سعر البيع بالفاتورة: {item.lockedUnitPrice} {settings.currency}/{item.unitName}
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5">
-                          المباع: {formatWeight(item.soldWeight)} • المرتجع سابقاً: {formatWeight(item.alreadyReturned)} • المتاح للإرجاع: <strong className="text-slate-700">{formatWeight(item.maxAvailable)}</strong>
+                          المباع: {item.soldQuantity} {item.unitName} ({item.soldPacks} علبة) • المرتجع سابقاً: {item.alreadyReturnedPacks} علبة • المتاح: <strong className="text-slate-700">{item.maxAvailableUnits} {item.unitName}</strong>
                         </div>
                       </div>
 
@@ -193,15 +228,15 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
                           <div className="flex items-center gap-1">
                             <input
                               type="number"
-                              step="0.01"
+                              step={item.unitType === 'piece' ? '1' : '1'}
                               min="0"
-                              max={item.maxAvailable}
-                              value={item.returnedWeight}
+                              max={item.maxAvailableUnits}
+                              value={item.returnedUnits}
                               onChange={(e) => handleItemReturnChange(idx, e.target.value)}
-                              placeholder="0.00"
+                              placeholder="0"
                               className="w-24 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900 text-center focus:outline-hidden focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
                             />
-                            <span className="text-xs font-bold text-slate-500">كجم</span>
+                            <span className="text-xs font-bold text-slate-500">{item.unitName}</span>
                           </div>
 
                           <button
@@ -220,14 +255,14 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
                       )}
                     </div>
 
-                    {/* Calculated refund row if weight entered */}
-                    {Number(item.returnedWeight || 0) > 0 && (
+                    {/* Calculated refund row if quantity entered */}
+                    {item.enteredUnits > 0 && (
                       <div className="mt-2 pt-2 border-t border-amber-200/80 flex items-center justify-between text-xs font-bold">
                         <span className="text-amber-800">
-                          القيمة المستردة للصنف ({item.returnedWeight} كجم × {item.originalPricePerKg} {settings.currency}):
+                          القيمة المستردة للصنف ({item.enteredUnits} {item.unitName} = {item.returnedPacks} علبة):
                         </span>
                         <span className="text-emerald-700 font-mono text-sm">
-                          {formatCurrency(itemRefund, settings.currency)}
+                          {formatCurrency(item.refund, settings.currency)}
                         </span>
                       </div>
                     )}
@@ -276,10 +311,10 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:outline-hidden focus:border-emerald-600"
               >
                 <option value="restock">إعادة للمخزن / الرف (صالح للبيع ثانية)</option>
-                <option value="damaged">تحويل إلى هالك وتوالف (غير صالح للتداول)</option>
+                <option value="damaged">تحويل إلى هالك وتوالف (تالف/مكسور)</option>
               </select>
               <p className="text-[10px] text-slate-500">
-                {inventoryAction === 'restock' && 'سيتم إضافة الوزن المرتجع تلقائياً إلى رصيد المخزن.'}
+                {inventoryAction === 'restock' && 'سيتم إضافة علب التبغ المرتجعة تلقائياً إلى رصيد المخزن.'}
                 {inventoryAction === 'damaged' && 'سيتم إدراج الكمية تلقائياً في سجل التوالف والهالك دون زيادة المخزن.'}
               </p>
             </div>
@@ -295,7 +330,7 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
               type="text"
               value={generalNotes}
               onChange={(e) => setGeneralNotes(e.target.value)}
-              placeholder="مثال: رغبة العميل في الاستبدال، زيادة عن الحاجة، تلف..."
+              placeholder="مثال: رغبة العميل في استبدال الصنف، شراء بالخطأ، علبة معطوبة..."
               className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-hidden focus:border-emerald-600"
             />
           </div>
@@ -305,7 +340,7 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
             <div>
               <span className="text-xs font-bold text-amber-900 block">إجمالي قيمة المردود المستحق:</span>
               <span className="text-[11px] text-amber-700">
-                إجمالي الوزن المرتجع: {formatWeight(totalReturnWeight)}
+                إجمالي العلب المرتجعة للمخزن: {totalReturnPacks} علبة
               </span>
             </div>
             <div className="text-lg sm:text-xl font-black text-emerald-700 font-mono">

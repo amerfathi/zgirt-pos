@@ -49,11 +49,12 @@ export default function SaleScreen({
   // Active item editor state (drawer / modal)
   const [isItemEditorOpen, setIsItemEditorOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
+  /** @type {[{ id: string, productId: string, name: string, unitType: string, unitName: string, quantity: number, packsPerCarton: number, unitsPerPack: number, unitPrice: number, costPrice: number, discountAmount: number }, React.Dispatch<any>]} */
   const [activeItem, setActiveItem] = useState({
     id: '',
     productId: '',
     name: '',
-    unitType: UNIT_TYPES.PACK, // 'carton' | 'pack' | 'piece'
+    unitType: /** @type {string} */ (UNIT_TYPES.PACK), // 'carton' | 'pack' | 'piece'
     unitName: 'علبة',
     quantity: 1,
     packsPerCarton: 10,
@@ -111,6 +112,11 @@ export default function SaleScreen({
   };
 
   // Helper to add item directly (from quick tap or barcode scan)
+  /**
+   * @param {any} prod
+   * @param {string} [preferredUnit]
+   * @param {number} [initialQty]
+   */
   const addItemToCartDirectly = (prod, preferredUnit = UNIT_TYPES.PACK, initialQty = 1) => {
     const isWholesale = saleMode === 'wholesale';
     const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);

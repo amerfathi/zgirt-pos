@@ -76,7 +76,7 @@ export default function BottomNav({
     { id: 'audit', label: 'الجرد والسيولة', icon: Scale, desc: 'الخزنة ومطابقة الدرج', perm: 'canViewFinance' },
     { id: 'expenses', label: 'المصروفات اليومية', icon: TrendingDown, desc: 'النثريات والتشغيل', perm: 'canManageExpenses' },
     { id: 'workers', label: 'الموظفون والرواتب', icon: UserCheck, desc: 'الرواتب واليوميات', perm: 'canManagePayroll' },
-    { id: 'damaged', label: 'التوالف والهالك', icon: AlertOctagon, desc: 'إعدام الخضار التالف', perm: 'canManageInventory' },
+    { id: 'damaged', label: 'التوالف والهالك', icon: AlertOctagon, desc: 'إعدام التبغ التالف', perm: 'canManageInventory' },
     { id: 'partners', label: 'الشركاء والأرباح', icon: Coins, desc: 'الأرباح والمسحوبات', perm: 'canViewFinance' },
     { id: 'reports', label: 'التقارير', icon: PieChart, desc: 'الطباعة والمحاسبة', perm: 'canViewFinance' },
     { id: 'settings', label: 'إعدادات وضبط النظام', icon: Settings, desc: 'الضرائب، الطابعات، والسحابة', perm: 'canAccessSettings' },

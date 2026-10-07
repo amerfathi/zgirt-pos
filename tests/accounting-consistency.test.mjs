@@ -52,12 +52,15 @@ test('Financial Consistency & Cash Shift Integrity Scenario', async (t) => {
   };
 
   // 4. Perform a Cash Retail Sale: 2 Packs of Marlboro Red
+  // 4. Perform a Cash Retail Sale: 2 Packs of Marlboro Red
   // Total: 2 * 28.00 = 56.00 (5600 cents)
   const retailSale = executeSaleTransaction({
     tenantId,
     branchId,
     cashierUserId: cashierId,
     shift,
+    customer: null,
+    invoiceNumber: 1,
     items: [
       { product: marlboro, unitType: UNIT_TYPES.PACK, quantity: 2 }
     ],
@@ -83,6 +86,7 @@ test('Financial Consistency & Cash Shift Integrity Scenario', async (t) => {
     cashierUserId: cashierId,
     shift,
     customer,
+    invoiceNumber: 2,
     items: [
       { product: marlboro, unitType: UNIT_TYPES.CARTON, quantity: 5 }
     ],
@@ -107,6 +111,8 @@ test('Financial Consistency & Cash Shift Integrity Scenario', async (t) => {
 
   // 6. Record Cash Expense from Drawer (e.g. municipal cleaning/supplies: 50.00 = 5000 cents)
   shift = recordCashTransaction(shift, {
+    id: crypto.randomUUID(),
+    referenceId: 'exp-1',
     amountCents: -5000,
     type: 'expense',
     notes: 'مصروف نظافة وبلدية'
@@ -118,6 +124,8 @@ test('Financial Consistency & Cash Shift Integrity Scenario', async (t) => {
   // 7. Customer pays back 500.00 (50000 cents) of their debt in cash
   customer.balance_cents -= 50000;
   shift = recordCashTransaction(shift, {
+    id: crypto.randomUUID(),
+    referenceId: 'pay-1',
     amountCents: 50000,
     type: 'customer_payment',
     notes: 'سداد دفعة من الحساب'
@@ -128,7 +136,8 @@ test('Financial Consistency & Cash Shift Integrity Scenario', async (t) => {
 
   // 8. Close Shift with counted cash: Exactly 130600 cents
   shift = closeShiftRecord(shift, {
-    countedCashCents: 130600
+    countedCashCents: 130600,
+    notes: 'إغلاق الوردية بدون عجز'
   });
 
   assert.equal(shift.status, 'closed');

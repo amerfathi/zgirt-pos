@@ -207,7 +207,7 @@ export default function DesktopLoginView({ store }) {
                   <div className="text-right truncate">
                     <span className="text-[10px] text-slate-400 block font-medium">المنشأة المتصلة</span>
                     <span className="font-bold text-slate-800 text-xs truncate block">
-                      {settings?.shopName || 'سوق ومحل الخضار والفواكه'}
+                      {settings?.shopName || 'متجر زقيرت للتبغ والدخان'}
                     </span>
                   </div>
                 </div>

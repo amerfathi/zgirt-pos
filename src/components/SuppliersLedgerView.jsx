@@ -115,7 +115,7 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
   const handleCreateSupplier = async () => {
     if (isSavingSupplier) return;
     if (!supplierForm.name.trim()) {
-      alert('يرجى كتابة اسم المورد أو المزرعة');
+      alert('يرجى كتابة اسم مورد التبغ أو الشركة الموزعة');
       return;
     }
 
@@ -963,7 +963,7 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
                 {/* Official Statement Header */}
                 <div className="border-b-2 border-slate-900 pb-4 flex items-center justify-between">
                   <div>
-                    <h1 className="text-xl font-black text-slate-900">{settings.shopName || 'سوق ومحل الخضار'}</h1>
+                    <h1 className="text-xl font-black text-slate-900">{settings.shopName || 'متجر زقيرت للتبغ والدخان'}</h1>
                     <p className="text-xs text-slate-600">{settings.subTitle} • {settings.phone}</p>
                     <p className="text-xs text-slate-500 mt-1">{settings.address}</p>
                   </div>

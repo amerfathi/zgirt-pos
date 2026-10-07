@@ -328,7 +328,7 @@ export default function SettingsView({
   const tenantUsers = users.filter(u => !u.tenantId || u.tenantId === (currentUser?.tenantId || 'tenant-demo'));
 
   const permissionsList = [
-    { key: 'canSell', title: 'البيع وإصدار الفواتير والميزان', desc: 'استخدام شاشة الكاشير ووزن الخضار وإصدار الإيصالات', icon: Receipt },
+    { key: 'canSell', title: 'البيع وإصدار الفواتير', desc: 'استخدام شاشة الكاشير وبيع التبغ والسجائر وإصدار الإيصالات', icon: Receipt },
     { key: 'canViewInvoices', title: 'استعراض سجل الفواتير', desc: 'عرض فواتير المبيعات السابقة وطباعة إيصالاتها', icon: FileText },
     { key: 'canVoidInvoices', title: 'إلغاء وحذف فواتير البيع (حساس)', desc: 'صلاحية إلغاء الفاتورة وإعادة الكميات للمخزن', icon: ShieldAlert, danger: true },
     { key: 'canManageCustomers', title: 'العملاء وتحصيل الديون', desc: 'إضافة العملاء وسداد ديون الذمم المدينة', icon: Users },
@@ -473,7 +473,7 @@ export default function SettingsView({
                         value={form.shopName || ''}
                         onChange={(e) => setForm(prev => ({ ...prev, shopName: e.target.value }))}
                         className="w-full px-3.5 py-2.5 bg-slate-50/70 border border-slate-200 rounded-xl font-bold text-navy-850 focus:bg-white focus:ring-2 focus:ring-primary-500 transition-all text-xs"
-                        placeholder="مثال: سوق ومحل الخضار والفواكه"
+                        placeholder="مثال: متجر زقيرت لبيع التبغ والدخان"
                         required
                       />
                     </div>
@@ -1064,8 +1064,8 @@ export default function SettingsView({
                       onChange={(e) => setForm(prev => ({ ...prev, weightPrecision: Number(e.target.value) }))}
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-navy-850 text-xs focus:ring-2 focus:ring-primary-500"
                     >
-                      <option value="2">خانتين عشريتين (0.00 كجم - الأنسب لمبيعات الخضار)</option>
-                      <option value="3">ثلاث خانات عشرية (0.000 كجم - دقة الجرام للموازين الحساسة)</option>
+                      <option value="2">خانتين عشريتين (0.00 - الأنسب للأسعار والكسور)</option>
+                      <option value="3">ثلاث خانات عشرية (0.000 - دقة عالية)</option>
                     </select>
                     <p className="text-[10px] text-slate-400 mt-1">
                       تحدد كيفية تقريب الأوزان وظهورها على شاشة البيع والإيصالات.

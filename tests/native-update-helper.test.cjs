@@ -17,7 +17,7 @@ test('Windows update handoff does not execute an encoded shell', () => {
 test('packaging builds and ships the native update helper', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.match(pkg.scripts['electron:build'], /build-update-helper/);
-  assert.ok(pkg.build.extraResources.some(entry => entry.to === 'Braka.UpdateHelper.exe'));
+  assert.ok(pkg.build.extraResources.some(entry => entry.to === 'Zgirt.UpdateHelper.exe' || entry.to === 'Braka.UpdateHelper.exe'));
 });
 
 test('native helper survives parent exit and launches the exact verified target', { skip: process.platform !== 'win32' }, async () => {

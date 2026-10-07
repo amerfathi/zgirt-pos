@@ -32,57 +32,57 @@ export default function SplashScreen({ onFinish, duration = 1200 }) {
       <div className="absolute top-1/4 -left-20 w-80 h-80 bg-primary-500/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-1/3 -right-20 w-80 h-80 bg-primary-500/15 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Top Bar: Skip button & Badge */}
-      <div className="w-full max-w-md flex items-center justify-between z-10 pt-2">
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-[11px] font-medium text-slate-300 border border-white/10">
-          <Sparkles size={13} className="text-primary-400" />
-          <span>سوق الخضار الذكي</span>
-        </span>
+        {/* Top Bar: Skip button & Badge */}
+        <div className="w-full max-w-md flex items-center justify-between z-10 pt-2">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-[11px] font-medium text-slate-300 border border-white/10">
+            <Sparkles size={13} className="text-primary-400" />
+            <span>نظام زقيرت المتطور</span>
+          </span>
 
-        <button
-          type="button"
-          onClick={onFinish}
-          className="px-3 py-1.5 bg-white/10 hover:bg-white/20 active:scale-95 text-slate-300 hover:text-white rounded-xl text-xs font-semibold backdrop-blur-md border border-white/10 flex items-center gap-1 transition-all cursor-pointer"
-          title="تخطي شاشة البداية والدخول فوراً"
-        >
-          <span>تخطي</span>
-          <ArrowLeft size={13} />
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={onFinish}
+            className="px-3 py-1.5 bg-white/10 hover:bg-white/20 active:scale-95 text-slate-300 hover:text-white rounded-xl text-xs font-semibold backdrop-blur-md border border-white/10 flex items-center gap-1 transition-all cursor-pointer"
+            title="تخطي شاشة البداية والدخول فوراً"
+          >
+            <span>تخطي</span>
+            <ArrowLeft size={13} />
+          </button>
+        </div>
 
-      {/* Center: Hero Logo & Brand Identity */}
-      <div className="flex flex-col items-center justify-center text-center z-10 my-auto py-8">
-        {/* Glowing Logo Container */}
-        <motion.div
-          initial={{ scale: 0.75, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
-          className="relative mb-6"
-        >
-          <div className="absolute -inset-4 bg-primary-500/20 rounded-3xl blur-xl" />
-          <div className="relative w-32 h-32 sm:w-40 sm:h-40 rounded-3xl bg-white/5 backdrop-blur-md border border-white/15 p-4 flex items-center justify-center shadow-2xl">
-            <img 
-              src={BRRAKA_LOGO} 
-              alt="شعار براكه" 
-              className="w-full h-full object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.5)]" 
-            />
-          </div>
-        </motion.div>
+        {/* Center: Hero Logo & Brand Identity */}
+        <div className="flex flex-col items-center justify-center text-center z-10 my-auto py-8">
+          {/* Glowing Logo Container */}
+          <motion.div
+            initial={{ scale: 0.75, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
+            className="relative mb-6"
+          >
+            <div className="absolute -inset-4 bg-primary-500/20 rounded-3xl blur-xl" />
+            <div className="relative w-32 h-32 sm:w-40 sm:h-40 rounded-3xl bg-white/5 backdrop-blur-md border border-white/15 p-4 flex items-center justify-center shadow-2xl">
+              <img 
+                src={BRRAKA_LOGO} 
+                alt="شعار زقيرت" 
+                className="w-full h-full object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.5)]" 
+              />
+            </div>
+          </motion.div>
 
-        {/* Title */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.25, duration: 0.7 }}
-          className="space-y-2"
-        >
-          <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-white">
-            منظومة براكه
-          </h1>
-          <p className="text-sm sm:text-base text-slate-300 font-medium max-w-xs mx-auto leading-relaxed">
-            كاشير ومحاسبة سحابية لمبيعات وموازين الخضار والفواكه
-          </p>
-        </motion.div>
+          {/* Title */}
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.25, duration: 0.7 }}
+            className="space-y-2"
+          >
+            <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-white">
+              منظومة زقيرت — ZGIRT
+            </h1>
+            <p className="text-sm sm:text-base text-slate-300 font-medium max-w-xs mx-auto leading-relaxed">
+              كاشير ومحاسبة سحابية لمبيعات التبغ والسجائر جملة وقطاعي
+            </p>
+          </motion.div>
 
         {/* Feature Badges */}
         <motion.div

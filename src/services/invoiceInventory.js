@@ -42,7 +42,7 @@ export function applyInvoiceInventory(products, invoice, direction) {
     const newBranch = Math.round((branchQuantity + direction * quantity) * 100) / 100;
     return { ...product,
       currentStockKg: newStock,
-      stockPacks: newStock,
+      ...(product.stockPacks !== undefined ? { stockPacks: newStock } : {}),
       branchStock: { ...branchStock, [branchId]: newBranch }
     };
   });

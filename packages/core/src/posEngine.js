@@ -104,6 +104,7 @@ export function executeSaleTransaction({
   let updatedShift = shift;
   if (shift && paidCashCents > 0) {
     updatedShift = recordCashTransaction(shift, {
+      id: crypto.randomUUID(),
       amountCents: paidCashCents,
       type: 'sale',
       referenceId: invoiceId,

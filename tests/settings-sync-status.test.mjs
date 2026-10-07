@@ -43,7 +43,7 @@ test('settings draft survives an unrelated store refresh before Save', async () 
   const syncService = { isOnline: true, getQueueLength: () => 0, subscribe: () => () => {} };
   const base = { syncService, branches: [], users: [], currentUser: { id: 'owner', tenantId: 'A', role: 'company_owner', username: 'owner' }, updateSettings: async () => {} };
   let root;
-  const shopInput = () => root.root.findAllByType('input').find(node => node.props.placeholder === 'مثال: سوق ومحل الخضار والفواكه');
+  const shopInput = () => root.root.findAllByType('input').find(node => node.props.placeholder === 'مثال: متجر زقيرت لبيع التبغ والدخان');
   try {
     await act(async () => { root = TestRenderer.create(React.createElement(loaded.exports.default, { store: { ...base, settings: { shopName: 'الأصل' } } })); });
     await act(async () => { shopInput().props.onChange({ target: { value: 'الاسم الجديد' } }); });

@@ -79,7 +79,7 @@ export default function MobileHomeHub({
         {
           id: 'products',
           title: 'الأصناف والأسعار',
-          desc: 'قائمة الخضار والتسعير',
+          desc: 'قائمة التبغ والتسعير',
           icon: Package,
           color: 'bg-slate-700 text-white',
           badge: products.length > 0 ? `${products.length} صنف` : null
@@ -87,7 +87,7 @@ export default function MobileHomeHub({
         {
           id: 'damaged',
           title: 'التوالف والهالك',
-          desc: 'إعدام الخضار التالف',
+          desc: 'إعدام التبغ التالف',
           icon: AlertOctagon,
           color: 'bg-slate-600 text-white',
           badge: null

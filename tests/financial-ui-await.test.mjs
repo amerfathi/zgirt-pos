@@ -302,18 +302,13 @@ test('sale form blocks rapid duplicate posting and cart reset until persistence 
   try {
     await act(async () => { root = TestRenderer.create(React.createElement(View, { store })); });
     await act(async () => { button('Tomato').props.onClick(); });
-    await act(async () => {
-      root.root.findAllByType('input').find(node => node.props.placeholder === 'أدخل الوزن الإجمالي على الميزان')
-        .props.onChange({ target: { value: '4' } });
-    });
-    await act(async () => { button('اعتماد الصنف بالفاتورة').props.onClick(); });
     let pending;
     const submit = button('حفظ بدون طباعة').props.onClick;
     await act(async () => { pending = submit(); await submit(); });
     assert.equal(calls, 1);
-    assert.equal(button('تفريغ الفاتورة').props.disabled, true);
+    assert.equal(button('تفريغ السلة').props.disabled, true);
     assert.equal(button('حفظ...').props.disabled, true);
-    await act(async () => { button('تفريغ الفاتورة').props.onClick(); });
+    await act(async () => { button('تفريغ السلة').props.onClick(); });
     assert.equal(button('حفظ...').props.disabled, true);
     await act(async () => { settle.reject(Error('Injected database failure')); await pending; });
     assert.match(alerts[0], /Injected database failure/);

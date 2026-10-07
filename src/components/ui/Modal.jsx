@@ -20,7 +20,7 @@ export default function Modal({
 }) {
   // ESC key to close
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || typeof window === 'undefined') return;
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') onClose?.();
     };
@@ -30,13 +30,14 @@ export default function Modal({
 
   // Lock body scroll
   useEffect(() => {
+    if (typeof document === 'undefined' || !document.body) return;
     if (isOpen) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = '';
     }
     return () => {
-      document.body.style.overflow = '';
+      if (document.body) document.body.style.overflow = '';
     };
   }, [isOpen]);
 

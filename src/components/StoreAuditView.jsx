@@ -615,11 +615,11 @@ export default function StoreAuditView({ store, onOpenA4Report }) {
                 <span className="font-mono font-bold">{formatCurrency(periodExpensesCash + periodExpensesBank, settings.currency)}</span>
               </div>
               <div className="flex justify-between text-slate-700">
-                <span>• مشتريات خضار مدفوعة فوراً (كاش/بنك):</span>
+                <span>• مشتريات تبغ مدفوعة فوراً (كاش/بنك):</span>
                 <span className="font-mono font-bold">{formatCurrency(periodPurchasesCash + periodPurchasesBank, settings.currency)}</span>
               </div>
               <div className="flex justify-between text-slate-700">
-                <span>• سداد دفعات لموردي الخضار:</span>
+                <span>• سداد دفعات لموردي التبغ:</span>
                 <span className="font-mono font-bold text-rose-700">{formatCurrency(periodSupplierPaymentsCash + periodSupplierPaymentsBank, settings.currency)}</span>
               </div>
               <div className="flex justify-between text-slate-700">

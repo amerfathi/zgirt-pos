@@ -1,53 +1,80 @@
 import React, { useState } from 'react';
-import { Trash2, Plus, AlertOctagon, Scale, DollarSign, Calendar, FileText, Printer, Check } from 'lucide-react';
-import { formatCurrency, formatWeight, getCurrentDateFormatted, getCurrentTimeFormatted } from '../utils/formatters';
+import { Trash2, Plus, AlertOctagon, DollarSign, Calendar, FileText, Printer, Check, Package, Layers } from 'lucide-react';
+import { formatCurrency, getCurrentDateFormatted, getCurrentTimeFormatted } from '../utils/formatters';
 
 export default function DamagedItemsView({ store, onOpenA4Report }) {
   const { damagedItems, products, settings, addDamagedItem, deleteDamagedItem } = store;
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [damageUnit, setDamageUnit] = useState('pack'); // 'carton' | 'pack' | 'piece'
   const [form, setForm] = useState({
     productId: '',
     productName: '',
-    quantityKg: '',
-    packageCount: '',
-    unit: 'صندوق',
-    costPerKg: '',
-    reason: 'فساد وتعفن طبيعي',
+    quantityInput: '',
+    costPerPack: '',
+    reason: 'علبة مكسورة أو مهشمة',
     notes: '',
   });
 
   // Calculate totals
-  const totalDamagedKg = damagedItems.reduce((sum, d) => sum + (Number(d.quantityKg) || 0), 0);
+  const totalDamagedPacks = damagedItems.reduce((sum, d) => sum + (Number(d.quantityKg) || 0), 0);
   const totalFinancialLoss = damagedItems.reduce((sum, d) => sum + (Number(d.totalLoss) || 0), 0);
+
+  const selectedProduct = products.find(p => p.id === form.productId);
+  const packsPerCarton = Number(selectedProduct?.packsPerCarton || selectedProduct?.packs_per_carton || 10);
+  const unitsPerPack = Number(selectedProduct?.unitsPerPack || 20);
 
   const handleProductSelect = (e) => {
     const prodId = e.target.value;
     const prod = products.find(p => p.id === prodId);
     if (prod) {
+      const costPack = prod.costPerPack ?? prod.costPerKg ?? prod.costPricePerKg ?? '';
       setForm(prev => ({
         ...prev,
         productId: prod.id,
         productName: prod.name,
-        unit: prod.defaultUnit || 'صندوق',
-        costPerKg: prod.costPerKg ?? prod.costPricePerKg ?? '',
+        costPerPack: costPack,
       }));
     } else {
-      setForm(prev => ({ ...prev, productId: '', productName: '', costPerKg: '' }));
+      setForm(prev => ({ ...prev, productId: '', productName: '', costPerPack: '' }));
     }
   };
 
+  // Compute normalized packs count and financial loss
+  const enteredQty = Number(form.quantityInput) || 0;
+  let normalizedPacks = enteredQty;
+  if (damageUnit === 'carton') {
+    normalizedPacks = enteredQty * packsPerCarton;
+  } else if (damageUnit === 'piece' && unitsPerPack > 0) {
+    normalizedPacks = Math.round((enteredQty / unitsPerPack) * 100) / 100;
+  }
+
+  const costPack = Number(form.costPerPack) || 0;
+  const calculatedLoss = Math.round(normalizedPacks * costPack * 100) / 100;
+
   const handleSave = async () => {
-    if (!form.productName || !form.quantityKg || Number(form.quantityKg) <= 0) {
-      alert('يرجى اختيار الصنف وتحديد كمية الوزن التالف بالكيلو');
+    if (!form.productName || enteredQty <= 0) {
+      alert('يرجى اختيار صنف التبغ وتحديد الكمية التالفة');
       return;
     }
 
-    try { await addDamagedItem({
-      ...form,
-      date: getCurrentDateFormatted(),
-      time: getCurrentTimeFormatted(),
-    }); } catch (error) {
+    try {
+      await addDamagedItem({
+        productId: form.productId,
+        productName: form.productName,
+        damageUnit,
+        enteredQuantity: enteredQty,
+        // Ledger boundary alias: packs stored in quantityKg, costPerPack in costPerKg
+        quantityKg: normalizedPacks,
+        costPerKg: costPack,
+        packageCount: damageUnit === 'carton' ? enteredQty : Math.floor(normalizedPacks / packsPerCarton),
+        unit: damageUnit === 'carton' ? 'كرتونة' : damageUnit === 'piece' ? 'سيجارة' : 'علبة',
+        reason: form.reason,
+        notes: form.notes ? `${form.notes} (${enteredQty} ${damageUnit === 'carton' ? 'كرتونة' : damageUnit === 'piece' ? 'سيجارة' : 'علبة'})` : `(${enteredQty} ${damageUnit === 'carton' ? 'كرتونة' : damageUnit === 'piece' ? 'سيجارة' : 'علبة'})`,
+        date: getCurrentDateFormatted(),
+        time: getCurrentTimeFormatted(),
+      });
+    } catch (error) {
       alert('تعذر حفظ سجل الإتلاف: ' + error.message);
       return;
     }
@@ -55,14 +82,12 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
     setForm({
       productId: '',
       productName: '',
-      quantityKg: '',
-      packageCount: '',
-      unit: 'صندوق',
-      costPerKg: '',
-      reason: 'فساد وتعفن طبيعي',
+      quantityInput: '',
+      costPerPack: '',
+      reason: 'علبة مكسورة أو مهشمة',
       notes: '',
     });
-
+    setDamageUnit('pack');
     setIsAddModalOpen(false);
   };
 
@@ -84,8 +109,8 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
               <AlertOctagon size={18} />
             </div>
             <div>
-              <h1 className="text-sm font-black text-slate-900">سجل التوالف وإعدامات البضاعة</h1>
-              <p className="text-[11px] text-slate-500 font-medium">متابعة الهدر اليومي في الخضار وحساب الخسائر المالية</p>
+              <h1 className="text-sm font-black text-slate-900">سجل التوالف وإعدامات التبغ</h1>
+              <p className="text-[11px] text-slate-500 font-medium">متابعة العلب المهشمة والكراتين التالفة واحتساب الخسائر المالية</p>
             </div>
           </div>
 
@@ -111,7 +136,7 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
           </div>
         </div>
 
-        {/* Waste & Financial Loss Stats */}
+        {/* Tobacco Waste & Financial Loss Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-100">
           <div className="bg-red-50 p-3 rounded-xl border border-red-100">
             <span className="text-[10px] text-red-800 font-bold block">إجمالي الخسارة المالية</span>
@@ -121,9 +146,9 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
           </div>
 
           <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-            <span className="text-[10px] text-slate-600 font-medium block">إجمالي الأوزان المعدمة</span>
-            <span className="text-base sm:text-lg font-black text-slate-900">
-              {formatWeight(totalDamagedKg)}
+            <span className="text-[10px] text-slate-600 font-medium block">إجمالي العلب التالفة</span>
+            <span className="text-base sm:text-lg font-black text-slate-900 font-mono">
+              {totalDamagedPacks} <span className="text-xs font-normal text-slate-500">علبة</span>
             </span>
           </div>
 
@@ -146,8 +171,8 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
         {damagedItems.length === 0 ? (
           <div className="p-8 text-center text-slate-400">
             <AlertOctagon size={32} className="mx-auto mb-2 opacity-30 text-emerald-600" />
-            <p className="text-xs font-bold text-slate-600">لا توجد أي أصناف تالفة مسجلة</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">البضاعة ممتازة وبدون هدر حالياً ✔</p>
+            <p className="text-xs font-bold text-slate-600">لا توجد أي أصناف تبغ تالفة مسجلة</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">البضاعة سليمة بدون كسر أو تلف حالياً ✔</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
@@ -163,12 +188,12 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
 
                   <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                     <span className="font-bold text-slate-800 font-mono">
-                      الوزن: {formatWeight(item.quantityKg)}
+                      الكمية: {item.quantityKg} علبة
                     </span>
-                    {item.packageCount > 0 && (
+                    {item.packageCount > 0 && item.unit && item.unit !== 'علبة' && (
                       <span>({item.packageCount} {item.unit})</span>
                     )}
-                    <span>التكلفة/كجم: {Number(item.costPerKg).toFixed(2)} {settings.currency}</span>
+                    <span>التكلفة/علبة: {Number(item.costPerKg).toFixed(2)} {settings.currency}</span>
                     <span className="text-slate-400">{item.date} • {item.time}</span>
                   </div>
 
@@ -206,64 +231,73 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
           <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-5 space-y-3.5 animate-in zoom-in-95">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <h3 className="font-black text-sm text-slate-900">
-                تسجيل صنف تالف / إعدام بضاعة
+                تسجيل صنف تبغ تالف / إعدام بضاعة
               </h3>
               <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-slate-600 text-xs font-bold">
                 ✕
               </button>
             </div>
 
-            {/* Select Product */}
+            {/* Select Tobacco Product */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">اختر الصنف التالف *</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">اختر صنف التبغ التالف *</label>
               <select
                 value={form.productId}
                 onChange={handleProductSelect}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-brand-600"
               >
-                <option value="">-- اختر من قائمة الخضروات --</option>
+                <option value="">-- اختر من قائمة التبغ --</option>
                 {products.map(p => (
-                  <option key={p.id} value={p.id}>{p.emoji} {p.name}</option>
+                  <option key={p.id} value={p.id}>{p.emoji || '🚬'} {p.name}</option>
                 ))}
               </select>
             </div>
 
-            {/* Quantity Kg & Package count */}
+            {/* Unit Selection & Quantity */}
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">الوزن التالف (كجم) *</label>
-                <input
-                  type="number"
-                  step="0.5"
-                  placeholder="مثلاً: 25"
-                  value={form.quantityKg}
-                  onChange={(e) => setForm(prev => ({ ...prev, quantityKg: e.target.value }))}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:ring-2 focus:ring-brand-600"
-                />
+                <label className="block text-xs font-bold text-slate-700 mb-1">وحدة الإتلاف</label>
+                <select
+                  value={damageUnit}
+                  onChange={(e) => setDamageUnit(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-brand-600"
+                >
+                  <option value="pack">علبة فردية</option>
+                  <option value="carton">كرتونة ({packsPerCarton} علبة)</option>
+                  <option value="piece">سيجارة مفردة</option>
+                </select>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">عدد العبوات / الصناديق</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">الكمية التالفة *</label>
                 <input
                   type="number"
-                  placeholder="مثلاً: 2"
-                  value={form.packageCount}
-                  onChange={(e) => setForm(prev => ({ ...prev, packageCount: e.target.value }))}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-brand-600"
+                  step="1"
+                  min="1"
+                  placeholder="مثلاً: 5"
+                  value={form.quantityInput}
+                  onChange={(e) => setForm(prev => ({ ...prev, quantityInput: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:ring-2 focus:ring-brand-600"
                 />
               </div>
             </div>
 
-            {/* Cost per Kg & Reason */}
+            {damageUnit !== 'pack' && enteredQty > 0 && (
+              <p className="text-[11px] text-slate-500 font-medium">
+                يعادل: <strong className="text-slate-800 font-mono">{normalizedPacks} علبة</strong>
+              </p>
+            )}
+
+            {/* Cost per Pack & Reason */}
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">سعر التكلفة للكيلو ({settings.currency})</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">سعر التكلفة للعلبة ({settings.currency})</label>
                 <input
                   type="number"
                   step="0.1"
                   placeholder="0.00"
-                  value={form.costPerKg}
-                  onChange={(e) => setForm(prev => ({ ...prev, costPerKg: e.target.value }))}
+                  value={form.costPerPack}
+                  onChange={(e) => setForm(prev => ({ ...prev, costPerPack: e.target.value }))}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-600"
                 />
               </div>
@@ -275,19 +309,20 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
                   onChange={(e) => setForm(prev => ({ ...prev, reason: e.target.value }))}
                   className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-brand-600"
                 >
-                  <option value="فساد وتعفن طبيعي">فساد وتعفن طبيعي</option>
-                  <option value="ذبول وتلف مبيت">ذبول وتلف مبيت</option>
-                  <option value="كسر وتهشم نقل">كسر وتهشم نقل</option>
-                  <option value="فرز رديء من المزرعة">فرز رديء من المزرعة</option>
+                  <option value="علبة مكسورة أو مهشمة">علبة مكسورة أو مهشمة</option>
+                  <option value="كرتونة مبللة أو تالفة">كرتونة مبللة أو تالفة</option>
+                  <option value="تبغ منتهي الصلاحية">تبغ منتهي الصلاحية</option>
+                  <option value="سوء تخزين ورطوبة">سوء تخزين ورطوبة</option>
+                  <option value="بضاعة غير صالحة للبيع">غير صالحة للبيع</option>
                 </select>
               </div>
             </div>
 
             {/* Total Loss preview */}
             <div className="bg-red-50 p-2.5 rounded-xl border border-red-100 flex items-center justify-between">
-              <span className="text-xs font-bold text-red-800">إجمالي الخسارة المالية التقديرية:</span>
+              <span className="text-xs font-bold text-red-800">إجمالي الخسارة المالية:</span>
               <span className="text-sm font-black text-red-900 font-mono">
-                {((Number(form.quantityKg) || 0) * (Number(form.costPerKg) || 0)).toFixed(2)} {settings.currency}
+                {calculatedLoss.toFixed(2)} {settings.currency}
               </span>
             </div>
 
@@ -295,7 +330,7 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
               <label className="block text-xs font-bold text-slate-700 mb-1">ملاحظات إضافية</label>
               <input
                 type="text"
-                placeholder="مثلاً: وردت هكذا من شحنة الخميس"
+                placeholder="مثلاً: كسر أثناء فتح الشحنة"
                 value={form.notes}
                 onChange={(e) => setForm(prev => ({ ...prev, notes: e.target.value }))}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-brand-600"

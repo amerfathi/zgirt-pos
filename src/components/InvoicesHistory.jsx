@@ -472,14 +472,18 @@ export default function InvoicesHistory({ store, onViewReceipt, onViewA4Invoice 
 
                     {/* Items Chips Preview with exact historical price */}
                     <div className="flex flex-wrap gap-1.5 pb-1">
-                      {(invoice.items || []).map((it, idx) => (
-                        <span key={idx} className="text-[10px] font-semibold bg-slate-50 text-slate-700 px-2 py-0.5 rounded-md border border-slate-200">
-                          {it.name} ({it.netWeight} كجم × {it.pricePerKg} {settings.currency})
-                          {Number(it.returnedWeight || 0) > 0 && (
-                            <span className="text-amber-700 font-bold ml-1">(ارتجع: {it.returnedWeight} كجم)</span>
-                          )}
-                        </span>
-                      ))}
+                      {(invoice.items || []).map((it, idx) => {
+                        const unitLabel = it.unitName || it.unit || (it.unitType === 'carton' ? 'كرتونة' : it.unitType === 'piece' ? 'سيجارة' : 'علبة');
+                        const displayQty = it.quantity ?? it.netWeight ?? 1;
+                        return (
+                          <span key={idx} className="text-[10px] font-semibold bg-slate-50 text-slate-700 px-2 py-0.5 rounded-md border border-slate-200">
+                            {it.name} ({displayQty} {unitLabel} × {it.unitPrice ?? it.pricePerKg} {settings.currency})
+                            {Number(it.returnedWeight || 0) > 0 && (
+                              <span className="text-amber-700 font-bold ml-1">(ارتجع: {it.returnedWeight} علبة)</span>
+                            )}
+                          </span>
+                        );
+                      })}
                     </div>
 
                     {/* Card Actions */}
@@ -628,9 +632,9 @@ export default function InvoicesHistory({ store, onViewReceipt, onViewA4Invoice 
                   <div className="space-y-1">
                     {(ret.items || []).map((it, i) => (
                       <div key={i} className="flex items-center justify-between text-xs font-medium text-slate-700">
-                        <span>• {it.name} ({formatWeight(it.returnedWeight)})</span>
+                        <span>• {it.name} ({it.returnedWeight} علبة)</span>
                         <span className="font-mono text-slate-600">
-                          {it.originalPricePerKg} {settings.currency}/كجم = <strong className="text-slate-900">{formatCurrency(it.subtotal, settings.currency)}</strong>
+                          {it.originalPricePerKg} {settings.currency}/علبة = <strong className="text-slate-900">{formatCurrency(it.subtotal, settings.currency)}</strong>
                         </span>
                       </div>
                     ))}
