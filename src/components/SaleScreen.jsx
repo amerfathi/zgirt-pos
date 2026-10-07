@@ -49,16 +49,17 @@ export default function SaleScreen({
   // Active item editor state (drawer / modal)
   const [isItemEditorOpen, setIsItemEditorOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
-  /** @type {[{ id: string, productId: string, name: string, unitType: string, unitName: string, quantity: number, packsPerCarton: number, unitsPerPack: number, unitPrice: number, costPrice: number, discountAmount: number }, React.Dispatch<any>]} */
+  /** @type {[{ id: string, productId: string, name: string, unitType: string, unitName: string, quantity: number, packsPerSleeve?: number, sleevesPerCarton?: number, packsPerCarton: number, unitsPerPack?: number, unitPrice: number, costPrice: number, discountAmount: number }, React.Dispatch<any>]} */
   const [activeItem, setActiveItem] = useState({
     id: '',
     productId: '',
     name: '',
-    unitType: /** @type {string} */ (UNIT_TYPES.PACK), // 'carton' | 'pack' | 'piece'
+    unitType: /** @type {string} */ (UNIT_TYPES.PACK), // 'carton' | 'sleeve' | 'pack'
     unitName: 'علبة',
     quantity: 1,
-    packsPerCarton: 10,
-    unitsPerPack: 20,
+    packsPerSleeve: 10,
+    sleevesPerCarton: 20,
+    packsPerCarton: 200,
     unitPrice: 0,
     costPrice: 0,
     discountAmount: 0
@@ -93,17 +94,22 @@ export default function SaleScreen({
     const barcode = barcodeScanInput.trim();
     if (!barcode) return;
 
-    // Search by pack barcode, carton barcode, or general code
+    // Search by pack barcode, sleeve barcode, carton barcode, or general code
     const matchedProduct = products.find(p => 
       (p.barcodePack && p.barcodePack === barcode) ||
+      (p.barcodeSleeve && p.barcodeSleeve === barcode) ||
       (p.barcodeCarton && p.barcodeCarton === barcode) ||
       (p.barcode && p.barcode === barcode) ||
       (p.id === barcode)
     );
 
     if (matchedProduct) {
-      const isCartonBarcode = matchedProduct.barcodeCarton === barcode;
-      const unitType = isCartonBarcode ? UNIT_TYPES.CARTON : UNIT_TYPES.PACK;
+      let unitType = /** @type {string} */ (UNIT_TYPES.PACK);
+      if (matchedProduct.barcodeCarton === barcode) {
+        unitType = UNIT_TYPES.CARTON;
+      } else if (matchedProduct.barcodeSleeve === barcode) {
+        unitType = UNIT_TYPES.SLEEVE;
+      }
       addItemToCartDirectly(matchedProduct, unitType, 1);
       setBarcodeScanInput('');
     } else {
@@ -119,26 +125,30 @@ export default function SaleScreen({
    */
   const addItemToCartDirectly = (prod, preferredUnit = UNIT_TYPES.PACK, initialQty = 1) => {
     const isWholesale = saleMode === 'wholesale';
-    const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
-    const unitsPerPack = Number(prod.unitsPerPack || prod.units_per_pack || 20);
+    const packsPerSleeve = Number(prod.packsPerSleeve || prod.packs_per_sleeve || 10);
+    const sleevesPerCarton = Number(prod.sleevesPerCarton || prod.sleeves_per_carton || (prod.packsPerCarton ? Math.max(1, Math.round(prod.packsPerCarton / packsPerSleeve)) : 20));
+    const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || (packsPerSleeve * sleevesPerCarton));
 
     // Calculate pricing using core packaging rules
     const pricing = calculateLineItem({
       product: {
         ...prod,
-        retail_price_pack_cents: prod.retail_price_pack_cents || Math.round((prod.retailPricePack || prod.defaultPricePerKg || 0) * 100),
-        retail_price_carton_cents: prod.retail_price_carton_cents || Math.round((prod.retailPriceCarton || (prod.retailPricePack * packsPerCarton) || 0) * 100),
-        wholesale_price_carton_cents: prod.wholesale_price_carton_cents || Math.round((prod.wholesalePriceCarton || (prod.retailPricePack * packsPerCarton * 0.95) || 0) * 100),
-        wholesale_price_pack_cents: prod.wholesale_price_pack_cents || Math.round((prod.wholesalePriceCarton ? prod.wholesalePriceCarton / packsPerCarton : (prod.retailPricePack || 0)) * 100)
+        packsPerSleeve,
+        sleevesPerCarton,
+        packsPerCarton
       },
       unitType: preferredUnit,
       quantity: initialQty,
       isWholesale
     });
 
-    const unitPrice = pricing.unitPriceCents / 100;
+    const unitPrice = pricing.unitPrice;
     const costPack = Number(prod.cost_price_pack_cents ? prod.cost_price_pack_cents / 100 : (prod.costPerPack || prod.costPerKg || 0));
-    const costPrice = preferredUnit === UNIT_TYPES.CARTON ? costPack * packsPerCarton : costPack;
+    const costPrice = preferredUnit === UNIT_TYPES.CARTON 
+      ? Number(prod.costPerCarton || (costPack * packsPerCarton))
+      : preferredUnit === UNIT_TYPES.SLEEVE
+      ? Number(prod.costPerSleeve || (costPack * packsPerSleeve))
+      : costPack;
 
     // Check if same item & same unit already in cart
     const existingIndex = cartItems.findIndex(it => it.productId === prod.id && it.unitType === preferredUnit);
@@ -150,9 +160,9 @@ export default function SaleScreen({
       const updatedPricing = calculateLineItem({
         product: {
           ...prod,
-          retail_price_pack_cents: prod.retail_price_pack_cents || Math.round((prod.retailPricePack || prod.defaultPricePerKg || 0) * 100),
-          retail_price_carton_cents: prod.retail_price_carton_cents || Math.round((prod.retailPriceCarton || 0) * 100),
-          wholesale_price_carton_cents: prod.wholesale_price_carton_cents || Math.round((prod.wholesalePriceCarton || 0) * 100)
+          packsPerSleeve,
+          sleevesPerCarton,
+          packsPerCarton
         },
         unitType: preferredUnit,
         quantity: newQty,
@@ -164,29 +174,31 @@ export default function SaleScreen({
         quantity: newQty,
         packsCount: updatedPricing.packsCount,
         netWeight: updatedPricing.packsCount, // For backward compatibility with legacy sync engine
-        total: updatedPricing.totalCents / 100
+        total: updatedPricing.totalPrice
       };
 
       setCartItems(prev => prev.map((it, idx) => idx === existingIndex ? updatedItem : it));
     } else {
       // Add new cart row
+      const unitName = preferredUnit === UNIT_TYPES.CARTON ? 'كرتونة' : preferredUnit === UNIT_TYPES.SLEEVE ? 'استيكة' : 'علبة';
       const newItem = {
         id: `line-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         productId: prod.id,
         name: prod.name,
         brand: prod.brand || '',
         unitType: preferredUnit,
-        unitName: preferredUnit === UNIT_TYPES.CARTON ? 'كرتونة' : preferredUnit === UNIT_TYPES.PIECE ? 'حبة' : 'علبة',
+        unitName,
         quantity: initialQty,
+        packsPerSleeve,
+        sleevesPerCarton,
         packsPerCarton,
-        unitsPerPack,
         packsCount: pricing.packsCount,
         netWeight: pricing.packsCount, // Backward compatibility for sync/store inventory subtraction
         unitPrice,
         pricePerKg: unitPrice, // For backward compatibility with legacy receipt/invoice schemas
         costPrice,
         costPerKg: costPrice,
-        total: pricing.totalCents / 100,
+        total: pricing.totalPrice,
         discountAmount: 0
       };
 
@@ -219,42 +231,50 @@ export default function SaleScreen({
     setCartItems(prev => prev.filter((_, idx) => idx !== index));
   };
 
-  // Toggle unit on an existing cart line (Carton <-> Pack)
+  // Toggle unit on an existing cart line (Carton <-> Sleeve <-> Pack)
   const handleToggleCartLineUnit = (index) => {
     const item = cartItems[index];
-    const nextUnit = item.unitType === UNIT_TYPES.PACK ? UNIT_TYPES.CARTON : UNIT_TYPES.PACK;
+    const unitOrder = [UNIT_TYPES.PACK, UNIT_TYPES.SLEEVE, UNIT_TYPES.CARTON];
+    const curIdx = unitOrder.indexOf(item.unitType);
+    const nextUnit = unitOrder[(curIdx + 1) % unitOrder.length];
     const prod = products.find(p => p.id === item.productId);
     if (!prod) return;
 
-    const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
+    const packsPerSleeve = Number(item.packsPerSleeve || prod.packsPerSleeve || 10);
+    const sleevesPerCarton = Number(item.sleevesPerCarton || prod.sleevesPerCarton || 20);
+    const packsPerCarton = Number(item.packsPerCarton || (packsPerSleeve * sleevesPerCarton));
     const isWholesale = saleMode === 'wholesale';
     const pricing = calculateLineItem({
       product: {
         ...prod,
-        retail_price_pack_cents: prod.retail_price_pack_cents || Math.round((prod.retailPricePack || prod.defaultPricePerKg || 0) * 100),
-        retail_price_carton_cents: prod.retail_price_carton_cents || Math.round((prod.retailPriceCarton || (prod.retailPricePack * packsPerCarton) || 0) * 100),
-        wholesale_price_carton_cents: prod.wholesale_price_carton_cents || Math.round((prod.wholesalePriceCarton || 0) * 100)
+        packsPerSleeve,
+        sleevesPerCarton,
+        packsPerCarton
       },
       unitType: nextUnit,
       quantity: item.quantity,
       isWholesale
     });
 
-    const unitPrice = pricing.unitPriceCents / 100;
+    const unitPrice = pricing.unitPrice;
     const costPack = Number(prod.cost_price_pack_cents ? prod.cost_price_pack_cents / 100 : (prod.costPerPack || prod.costPerKg || 0));
-    const costPrice = nextUnit === UNIT_TYPES.CARTON ? costPack * packsPerCarton : costPack;
+    const costPrice = nextUnit === UNIT_TYPES.CARTON 
+      ? Number(prod.costPerCarton || (costPack * packsPerCarton))
+      : nextUnit === UNIT_TYPES.SLEEVE
+      ? Number(prod.costPerSleeve || (costPack * packsPerSleeve))
+      : costPack;
 
     const updated = {
       ...item,
       unitType: nextUnit,
-      unitName: nextUnit === UNIT_TYPES.CARTON ? 'كرتونة' : 'علبة',
+      unitName: nextUnit === UNIT_TYPES.CARTON ? 'كرتونة' : nextUnit === UNIT_TYPES.SLEEVE ? 'استيكة' : 'علبة',
       unitPrice,
       pricePerKg: unitPrice,
       costPrice,
       costPerKg: costPrice,
       packsCount: pricing.packsCount,
       netWeight: pricing.packsCount,
-      total: pricing.totalCents / 100
+      total: pricing.totalPrice
     };
 
     setCartItems(prev => prev.map((it, idx) => idx === index ? updated : it));
@@ -268,15 +288,21 @@ export default function SaleScreen({
 
     const prod = products.find(p => p.id === item.productId);
     const isWholesale = saleMode === 'wholesale';
+    const packsPerSleeve = Number(item.packsPerSleeve || prod?.packsPerSleeve || 10);
+    const sleevesPerCarton = Number(item.sleevesPerCarton || prod?.sleevesPerCarton || 20);
+    const packsPerCarton = Number(item.packsPerCarton || (packsPerSleeve * sleevesPerCarton));
+
     const pricing = calculateLineItem({
       product: prod ? {
         ...prod,
-        retail_price_pack_cents: prod.retail_price_pack_cents || Math.round((prod.retailPricePack || prod.defaultPricePerKg || 0) * 100),
-        retail_price_carton_cents: prod.retail_price_carton_cents || Math.round((prod.retailPriceCarton || 0) * 100),
-        wholesale_price_carton_cents: prod.wholesale_price_carton_cents || Math.round((prod.wholesalePriceCarton || 0) * 100)
+        packsPerSleeve,
+        sleevesPerCarton,
+        packsPerCarton
       } : {
-        retail_price_pack_cents: Math.round(item.unitPrice * 100),
-        packs_per_carton: item.packsPerCarton || 10
+        retailPricePack: item.unitPrice,
+        packsPerSleeve,
+        sleevesPerCarton,
+        packsPerCarton
       },
       unitType: item.unitType,
       quantity: newQty,
@@ -288,7 +314,7 @@ export default function SaleScreen({
       quantity: newQty,
       packsCount: pricing.packsCount,
       netWeight: pricing.packsCount,
-      total: pricing.totalCents / 100
+      total: pricing.totalPrice
     } : it));
   };
 
@@ -302,22 +328,28 @@ export default function SaleScreen({
     const qty = Number(activeItem.quantity) || 1;
     const unitPrice = Number(activeItem.unitPrice) || 0;
     const total = Math.round(qty * unitPrice * 100) / 100;
-    const packsPerCarton = Number(activeItem.packsPerCarton) || 10;
-    const unitsPerPack = Number(activeItem.unitsPerPack) || 20;
+    const packsPerSleeve = Number(activeItem.packsPerSleeve) || 10;
+    const sleevesPerCarton = Number(activeItem.sleevesPerCarton) || 20;
+    const packsPerCarton = Number(activeItem.packsPerCarton) || (packsPerSleeve * sleevesPerCarton);
 
     let packsCount = qty;
     if (activeItem.unitType === UNIT_TYPES.CARTON) packsCount = qty * packsPerCarton;
-    else if (activeItem.unitType === UNIT_TYPES.PIECE) packsCount = qty / unitsPerPack;
+    else if (activeItem.unitType === UNIT_TYPES.SLEEVE) packsCount = qty * packsPerSleeve;
+
+    const unitName = activeItem.unitType === UNIT_TYPES.CARTON ? 'كرتونة' : activeItem.unitType === UNIT_TYPES.SLEEVE ? 'استيكة' : 'علبة';
 
     const finalizedItem = {
       ...activeItem,
       id: activeItem.id || `line-${Date.now()}`,
-      unitName: activeItem.unitType === UNIT_TYPES.CARTON ? 'كرتونة' : activeItem.unitType === UNIT_TYPES.PIECE ? 'حبة' : 'علبة',
+      unitName,
       quantity: qty,
       unitPrice,
       pricePerKg: unitPrice,
       costPrice: Number(activeItem.costPrice) || 0,
       costPerKg: Number(activeItem.costPrice) || 0,
+      packsPerSleeve,
+      sleevesPerCarton,
+      packsPerCarton,
       packsCount,
       netWeight: packsCount,
       total
@@ -340,24 +372,26 @@ export default function SaleScreen({
     setCartItems(prev => prev.map(item => {
       const prod = products.find(p => p.id === item.productId);
       if (!prod) return item;
-      const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
+      const packsPerSleeve = Number(item.packsPerSleeve || prod.packsPerSleeve || 10);
+      const sleevesPerCarton = Number(item.sleevesPerCarton || prod.sleevesPerCarton || 20);
+      const packsPerCarton = Number(item.packsPerCarton || (packsPerSleeve * sleevesPerCarton));
       const pricing = calculateLineItem({
         product: {
           ...prod,
-          retail_price_pack_cents: prod.retail_price_pack_cents || Math.round((prod.retailPricePack || prod.defaultPricePerKg || 0) * 100),
-          retail_price_carton_cents: prod.retail_price_carton_cents || Math.round((prod.retailPriceCarton || (prod.retailPricePack * packsPerCarton) || 0) * 100),
-          wholesale_price_carton_cents: prod.wholesale_price_carton_cents || Math.round((prod.wholesalePriceCarton || 0) * 100)
+          packsPerSleeve,
+          sleevesPerCarton,
+          packsPerCarton
         },
         unitType: item.unitType,
         quantity: item.quantity,
         isWholesale
       });
-      const unitPrice = pricing.unitPriceCents / 100;
+      const unitPrice = pricing.unitPrice;
       return {
         ...item,
         unitPrice,
         pricePerKg: unitPrice,
-        total: pricing.totalCents / 100
+        total: pricing.totalPrice
       };
     }));
   };
@@ -1115,13 +1149,13 @@ export default function SaleScreen({
                 onChange={(e) => setActiveItem(prev => ({ 
                   ...prev, 
                   unitType: e.target.value,
-                  unitName: e.target.value === UNIT_TYPES.CARTON ? 'كرتونة' : e.target.value === UNIT_TYPES.PIECE ? 'حبة' : 'علبة'
+                  unitName: e.target.value === UNIT_TYPES.CARTON ? 'كرتونة' : e.target.value === UNIT_TYPES.SLEEVE ? 'استيكة' : 'علبة'
                 }))}
                 className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-primary-500"
               >
                 <option value={UNIT_TYPES.PACK}>علبة (Pack)</option>
+                <option value={UNIT_TYPES.SLEEVE}>استيكة (Sleeve)</option>
                 <option value={UNIT_TYPES.CARTON}>كرتونة (Carton)</option>
-                <option value={UNIT_TYPES.PIECE}>حبة سجارة (Piece)</option>
               </select>
             </div>
 

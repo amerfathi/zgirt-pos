@@ -6,7 +6,7 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
   const { damagedItems, products, settings, addDamagedItem, deleteDamagedItem } = store;
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [damageUnit, setDamageUnit] = useState('pack'); // 'carton' | 'pack' | 'piece'
+  const [damageUnit, setDamageUnit] = useState('pack'); // 'carton' | 'sleeve' | 'pack'
   const [form, setForm] = useState({
     productId: '',
     productName: '',
@@ -21,8 +21,9 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
   const totalFinancialLoss = damagedItems.reduce((sum, d) => sum + (Number(d.totalLoss) || 0), 0);
 
   const selectedProduct = products.find(p => p.id === form.productId);
-  const packsPerCarton = Number(selectedProduct?.packsPerCarton || selectedProduct?.packs_per_carton || 10);
-  const unitsPerPack = Number(selectedProduct?.unitsPerPack || 20);
+  const packsPerSleeve = Number(selectedProduct?.packsPerSleeve || selectedProduct?.packs_per_sleeve || 10);
+  const sleevesPerCarton = Number(selectedProduct?.sleevesPerCarton || selectedProduct?.sleeves_per_carton || (selectedProduct?.packsPerCarton ? Math.max(1, Math.round(selectedProduct.packsPerCarton / packsPerSleeve)) : 20));
+  const packsPerCarton = Number(selectedProduct?.packsPerCarton || (packsPerSleeve * sleevesPerCarton));
 
   const handleProductSelect = (e) => {
     const prodId = e.target.value;
@@ -40,13 +41,13 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
     }
   };
 
-  // Compute normalized packs count and financial loss
-  const enteredQty = Number(form.quantityInput) || 0;
+  // Compute normalized integer packs count and financial loss
+  const enteredQty = Math.max(0, Math.floor(Number(form.quantityInput) || 0));
   let normalizedPacks = enteredQty;
   if (damageUnit === 'carton') {
     normalizedPacks = enteredQty * packsPerCarton;
-  } else if (damageUnit === 'piece' && unitsPerPack > 0) {
-    normalizedPacks = Math.round((enteredQty / unitsPerPack) * 100) / 100;
+  } else if (damageUnit === 'sleeve') {
+    normalizedPacks = enteredQty * packsPerSleeve;
   }
 
   const costPack = Number(form.costPerPack) || 0;
@@ -58,19 +59,24 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
       return;
     }
 
+    const unitLabel = damageUnit === 'carton' ? 'كرتونة' : damageUnit === 'sleeve' ? 'استيكة' : 'علبة';
+
     try {
       await addDamagedItem({
         productId: form.productId,
         productName: form.productName,
         damageUnit,
         enteredQuantity: enteredQty,
-        // Ledger boundary alias: packs stored in quantityKg, costPerPack in costPerKg
+        packsPerSleeve,
+        sleevesPerCarton,
+        packsPerCarton,
+        // Ledger boundary alias: integer packs stored in quantityKg, costPerPack in costPerKg
         quantityKg: normalizedPacks,
         costPerKg: costPack,
         packageCount: damageUnit === 'carton' ? enteredQty : Math.floor(normalizedPacks / packsPerCarton),
-        unit: damageUnit === 'carton' ? 'كرتونة' : damageUnit === 'piece' ? 'سيجارة' : 'علبة',
+        unit: unitLabel,
         reason: form.reason,
-        notes: form.notes ? `${form.notes} (${enteredQty} ${damageUnit === 'carton' ? 'كرتونة' : damageUnit === 'piece' ? 'سيجارة' : 'علبة'})` : `(${enteredQty} ${damageUnit === 'carton' ? 'كرتونة' : damageUnit === 'piece' ? 'سيجارة' : 'علبة'})`,
+        notes: form.notes ? `${form.notes} (${enteredQty} ${unitLabel})` : `(${enteredQty} ${unitLabel})`,
         date: getCurrentDateFormatted(),
         time: getCurrentTimeFormatted(),
       });
@@ -263,8 +269,8 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-brand-600"
                 >
                   <option value="pack">علبة فردية</option>
+                  <option value="sleeve">استيكة ({packsPerSleeve} علبة)</option>
                   <option value="carton">كرتونة ({packsPerCarton} علبة)</option>
-                  <option value="piece">سيجارة مفردة</option>
                 </select>
               </div>
 

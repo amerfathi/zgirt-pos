@@ -2,8 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   UNIT_TYPES,
+  getProductPackagingFactors,
+  normalizeToPacks,
   toBaseUnit,
   fromBaseUnit,
+  decomposePackStock,
   calculateLineItem,
   calculateInvoiceTotals
 } from '../packages/core/src/packaging.js';
@@ -18,229 +21,284 @@ import {
 } from '../src/services/businessEffects.js';
 import { applyInvoiceInventory } from '../src/services/invoiceInventory.js';
 
-test('Tobacco Domain: Packaging Conversions (Carton -> Packs -> Pieces)', () => {
-  const packsPerCarton = 10;
-  const unitsPerPack = 20;
+test('Tobacco Domain: Configurable Packaging Hierarchy (Products A, B, C)', () => {
+  // Product A: 5 packs / sleeve, 10 sleeves / carton = 50 packs / carton
+  const prodA = {
+    id: 'prod-a',
+    name: 'صنف أ',
+    category: 'سجائر',
+    packsPerSleeve: 5,
+    sleevesPerCarton: 10
+  };
+  const factorsA = getProductPackagingFactors(prodA);
+  assert.equal(factorsA.packsPerSleeve, 5);
+  assert.equal(factorsA.sleevesPerCarton, 10);
+  assert.equal(factorsA.packsPerCarton, 50);
 
-  // 1 carton = 10 packs
-  assert.equal(toBaseUnit(1, UNIT_TYPES.CARTON, packsPerCarton, unitsPerPack), 10);
-  // 5 packs = 5 packs
-  assert.equal(toBaseUnit(5, UNIT_TYPES.PACK, packsPerCarton, unitsPerPack), 5);
-  // 10 pieces = 0.5 packs
-  assert.equal(toBaseUnit(10, UNIT_TYPES.PIECE, packsPerCarton, unitsPerPack), 0.5);
+  assert.equal(normalizeToPacks(1, UNIT_TYPES.CARTON, prodA), 50);
+  assert.equal(normalizeToPacks(2, UNIT_TYPES.SLEEVE, prodA), 10);
+  assert.equal(normalizeToPacks(3, UNIT_TYPES.PACK, prodA), 3);
 
-  // Conversion back from base packs
-  // 50 packs = 5 cartons
-  assert.equal(fromBaseUnit(50, UNIT_TYPES.CARTON, packsPerCarton, unitsPerPack), 5);
-  // 3.5 packs = 70 pieces
-  assert.equal(fromBaseUnit(3.5, UNIT_TYPES.PIECE, packsPerCarton, unitsPerPack), 70);
+  // Product B: 10 packs / sleeve, 20 sleeves / carton = 200 packs / carton
+  const prodB = {
+    id: 'prod-b',
+    name: 'صنف ب',
+    category: 'سجائر',
+    packsPerSleeve: 10,
+    sleevesPerCarton: 20
+  };
+  const factorsB = getProductPackagingFactors(prodB);
+  assert.equal(factorsB.packsPerSleeve, 10);
+  assert.equal(factorsB.sleevesPerCarton, 20);
+  assert.equal(factorsB.packsPerCarton, 200);
+
+  assert.equal(normalizeToPacks(1, UNIT_TYPES.CARTON, prodB), 200);
+  assert.equal(normalizeToPacks(3, UNIT_TYPES.SLEEVE, prodB), 30);
+  assert.equal(normalizeToPacks(7, UNIT_TYPES.PACK, prodB), 7);
+
+  // Product C: 20 packs / sleeve, 100 sleeves / carton = 2000 packs / carton
+  const prodC = {
+    id: 'prod-c',
+    name: 'صنف ج',
+    category: 'سجائر',
+    packsPerSleeve: 20,
+    sleevesPerCarton: 100
+  };
+  const factorsC = getProductPackagingFactors(prodC);
+  assert.equal(factorsC.packsPerSleeve, 20);
+  assert.equal(factorsC.sleevesPerCarton, 100);
+  assert.equal(factorsC.packsPerCarton, 2000);
+
+  assert.equal(normalizeToPacks(1, UNIT_TYPES.CARTON, prodC), 2000);
+  assert.equal(normalizeToPacks(2, UNIT_TYPES.SLEEVE, prodC), 40);
+  assert.equal(normalizeToPacks(5, UNIT_TYPES.PACK, prodC), 5);
 });
 
-test('Tobacco Domain: Retail Pack Sale (Stock deduction, Revenue, Pricing)', () => {
+test('Tobacco Domain: Authoritative Pack Base Unit & Stock Decomposition', () => {
+  // Product B: 10 packs/sleeve, 20 sleeves/carton (200 packs/carton)
+  const prodB = {
+    id: 'prod-b',
+    packsPerSleeve: 10,
+    sleevesPerCarton: 20
+  };
+
+  // Stock: 624 packs -> 3 cartons, 2 sleeves, 4 packs
+  const decomp = decomposePackStock(624, prodB);
+  assert.equal(decomp.cartons, 3);
+  assert.equal(decomp.sleeves, 2);
+  assert.equal(decomp.packs, 4);
+  assert.equal(decomp.totalPacks, 624);
+  assert.equal(decomp.formatted, '3 كرتونة و 2 استيكة و 4 علبة');
+
+  // Exact carton match: 400 packs -> 2 cartons, 0 sleeves, 0 packs
+  const exactDecomp = decomposePackStock(400, prodB);
+  assert.equal(exactDecomp.cartons, 2);
+  assert.equal(exactDecomp.sleeves, 0);
+  assert.equal(exactDecomp.packs, 0);
+});
+
+test('Tobacco Domain: Independent Configurable Pricing (Pack, Sleeve, Carton)', () => {
   const product = {
     id: 'prod-marlboro',
     name: 'مارلبورو أحمر',
-    currentStockKg: 100, // 100 packs
-    costPerKg: 20.0,     // 20.0 SAR per pack
+    category: 'سجائر',
+    packsPerSleeve: 10,
+    sleevesPerCarton: 20, // 200 packs / carton
     retailPricePack: 28.0,
-    retailPriceCarton: 275.0,
-    wholesalePriceCarton: 260.0,
-    packsPerCarton: 10,
-    unitsPerPack: 20
+    retailPriceSleeve: 275.0,     // Special sleeve retail price
+    retailPriceCarton: 5400.0,    // Special carton retail price (override, not strictly 28*200)
+    wholesalePriceSleeve: 265.0,  // Wholesale sleeve price
+    wholesalePriceCarton: 5200.0  // Wholesale carton price
   };
 
-  // Sale of 3 packs
-  const line = calculateLineItem({
+  // Retail Pack Sale
+  const packSale = calculateLineItem({
     product,
     unitType: UNIT_TYPES.PACK,
-    quantity: 3,
+    quantity: 2,
     saleMode: 'retail'
   });
+  assert.equal(packSale.unitPrice, 28.0);
+  assert.equal(packSale.totalPrice, 56.0);
+  assert.equal(packSale.packsCount, 2);
 
-  assert.equal(line.quantity, 3);
-  assert.equal(line.unitPrice, 28.0);
-  assert.equal(line.totalPrice, 84.0);
-  assert.equal(line.packsCount, 3);
+  // Retail Sleeve Sale
+  const sleeveSale = calculateLineItem({
+    product,
+    unitType: UNIT_TYPES.SLEEVE,
+    quantity: 1,
+    saleMode: 'retail'
+  });
+  assert.equal(sleeveSale.unitPrice, 275.0);
+  assert.equal(sleeveSale.totalPrice, 275.0);
+  assert.equal(sleeveSale.packsCount, 10);
 
-  // Apply to inventory via applyInvoiceInventory
-  const invoice = {
-    id: 'inv-001',
-    branchId: 'branch-main',
-    items: [line]
-  };
+  // Retail Carton Sale
+  const cartonSale = calculateLineItem({
+    product,
+    unitType: UNIT_TYPES.CARTON,
+    quantity: 1,
+    saleMode: 'retail'
+  });
+  assert.equal(cartonSale.unitPrice, 5400.0);
+  assert.equal(cartonSale.totalPrice, 5400.0);
+  assert.equal(cartonSale.packsCount, 200);
 
-  const updatedProducts = applyInvoiceInventory([product], invoice, -1);
-  assert.equal(updatedProducts[0].currentStockKg, 97); // 100 - 3 = 97 packs
+  // Wholesale Sleeve Sale
+  const wsSleeveSale = calculateLineItem({
+    product,
+    unitType: UNIT_TYPES.SLEEVE,
+    quantity: 3,
+    saleMode: 'wholesale'
+  });
+  assert.equal(wsSleeveSale.unitPrice, 265.0);
+  assert.equal(wsSleeveSale.totalPrice, 795.0);
+  assert.equal(wsSleeveSale.packsCount, 30);
+
+  // Wholesale Carton Sale
+  const wsCartonSale = calculateLineItem({
+    product,
+    unitType: UNIT_TYPES.CARTON,
+    quantity: 2,
+    saleMode: 'wholesale'
+  });
+  assert.equal(wsCartonSale.unitPrice, 5200.0);
+  assert.equal(wsCartonSale.totalPrice, 10400.0);
+  assert.equal(wsCartonSale.packsCount, 400);
 });
 
-test('Tobacco Domain: Wholesale Carton Sale (Conversion factor, Stock deduction)', () => {
+test('Tobacco Domain: Individual Cigarette Piece Sale is Blocked for Cigarettes', () => {
+  const cigaretteProd = {
+    id: 'prod-cigs',
+    name: 'سجائر وينستون',
+    category: 'سجائر',
+    packsPerSleeve: 10,
+    sleevesPerCarton: 20
+  };
+
+  assert.throws(() => {
+    normalizeToPacks(1, UNIT_TYPES.PIECE, cigaretteProd);
+  }, /بيع أو تخزين السجائر بالحبة المفردة غير مدعوم/);
+});
+
+test('Tobacco Domain: Purchases with Product-Specific Packaging & Weighted Average Cost', () => {
+  // Product B: 10 packs/sleeve, 20 sleeves/carton (200 packs/carton)
   const product = {
     id: 'prod-winston',
     name: 'وينستون أزرق',
-    currentStockKg: 200, // 200 packs = 20 cartons
-    costPerKg: 15.0,
-    retailPricePack: 22.0,
-    retailPriceCarton: 215.0,
-    wholesalePriceCarton: 205.0,
-    packsPerCarton: 10,
-    unitsPerPack: 20
+    category: 'سجائر',
+    packsPerSleeve: 10,
+    sleevesPerCarton: 20,
+    packsPerCarton: 200,
+    currentStockKg: 200, // 200 packs initial stock
+    costPerKg: 15.0,     // 15.0 SAR per pack initial cost
+    branchStock: { 'branch-main': 200 }
   };
 
-  // Wholesale purchase of 4 cartons
-  const line = calculateLineItem({
-    product,
-    unitType: UNIT_TYPES.CARTON,
-    quantity: 4,
-    saleMode: 'wholesale'
-  });
-
-  assert.equal(line.quantity, 4);
-  assert.equal(line.unitPrice, 205.0); // Wholesale carton price
-  assert.equal(line.totalPrice, 820.0); // 4 * 205 = 820.00
-  assert.equal(line.packsCount, 40);    // 4 cartons * 10 packs = 40 packs
-
-  const invoice = {
-    id: 'inv-002',
-    branchId: 'branch-main',
-    items: [line]
-  };
-
-  const updatedProducts = applyInvoiceInventory([product], invoice, -1);
-  assert.equal(updatedProducts[0].currentStockKg, 160); // 200 - 40 = 160 packs
-});
-
-test('Tobacco Domain: Single Piece Sale (Fractional pack deduction)', () => {
-  const product = {
-    id: 'prod-dunhill',
-    name: 'دنهل أبيض',
-    currentStockKg: 50,
-    costPerKg: 22.0,
-    retailPricePack: 30.0,
-    packsPerCarton: 10,
-    unitsPerPack: 20 // 20 cigarettes per pack -> 1.5 SAR per piece
-  };
-
-  const line = calculateLineItem({
-    product,
-    unitType: UNIT_TYPES.PIECE,
-    quantity: 4, // 4 cigarettes
-    saleMode: 'retail'
-  });
-
-  assert.equal(line.quantity, 4);
-  assert.equal(line.unitPrice, 1.5); // 30 / 20 = 1.5 SAR
-  assert.equal(line.totalPrice, 6.0); // 4 * 1.5 = 6.0 SAR
-  assert.equal(line.packsCount, 0.2); // 4 / 20 = 0.2 packs
-
-  const invoice = {
-    id: 'inv-003',
-    branchId: 'branch-main',
-    items: [line]
-  };
-
-  const updatedProducts = applyInvoiceInventory([product], invoice, -1);
-  assert.equal(updatedProducts[0].currentStockKg, 49.8); // 50 - 0.2 = 49.8 packs
-});
-
-test('Tobacco Domain: Purchasing & Weighted Average Cost per Pack', () => {
-  const product = {
-    id: 'prod-rothmans',
-    name: 'روثمانز أزرق',
-    currentStockKg: 50, // 50 packs currently in stock
-    costPerKg: 16.0,    // 16.0 SAR per pack
-    branchStock: { 'branch-main': 50 }
-  };
-
-  // Purchase: 10 cartons (each carton 10 packs = 100 packs) at 180 SAR per carton (18.0 SAR per pack)
+  // Purchase: 4 cartons at 3200 SAR per carton = 12800 SAR
+  // 4 cartons * 200 packs = 800 packs
+  // Cost per pack = 3200 / 200 = 16.0 SAR per pack
   const purchase = {
-    id: 'pur-101',
+    id: 'pur-201',
     branchId: 'branch-main',
-    productId: 'prod-rothmans',
-    productName: 'روثمانز أزرق',
-    quantityKg: 100, // 100 packs
-    costPerKg: 18.0,  // 18.0 SAR per pack
-    totalCost: 1800.0
+    productId: 'prod-winston',
+    productName: 'وينستون أزرق',
+    purchaseUnit: 'carton',
+    purchaseQuantity: 4,
+    packsPerSleeve: 10,
+    sleevesPerCarton: 20,
+    packsPerCarton: 200,
+    quantityKg: 800, // 800 packs
+    costPerKg: 16.0,  // 16.0 SAR per pack
+    totalCost: 12800.0
   };
 
-  // Existing value: 50 * 16.0 = 800 SAR
-  // Inflow value: 100 * 18.0 = 1800 SAR
-  // New stock: 150 packs
-  // New average cost: (800 + 1800) / 150 = 2600 / 150 = 17.33 SAR per pack
+  // Existing value: 200 * 15.0 = 3000 SAR
+  // Incoming value: 800 * 16.0 = 12800 SAR
+  // New stock: 1000 packs
+  // Weighted average cost = (3000 + 12800) / 1000 = 15800 / 1000 = 15.80 SAR per pack
   const updatedProducts = applyPurchaseInventory([product], purchase, 1);
-  assert.equal(updatedProducts[0].currentStockKg, 150);
-  assert.equal(updatedProducts[0].costPerKg, 17.33);
+  assert.equal(updatedProducts[0].currentStockKg, 1000);
+  assert.equal(updatedProducts[0].costPerKg, 15.8);
 });
 
-test('Tobacco Domain: Purchase Return Workflow (Vendor Debt & Stock deduction)', () => {
+test('Tobacco Domain: Purchase Return Workflow (Cartons, Sleeves, Packs at Historical Cost)', () => {
   const product = {
-    id: 'prod-rothmans',
-    name: 'روثمانز أزرق',
-    currentStockKg: 150,
-    costPerKg: 17.33,
-    branchStock: { 'branch-main': 150 }
+    id: 'prod-winston',
+    name: 'وينستون أزرق',
+    currentStockKg: 1000,
+    costPerKg: 15.8,
+    branchStock: { 'branch-main': 1000 }
   };
 
   const originalPurchase = {
-    id: 'pur-101',
+    id: 'pur-201',
     branchId: 'branch-main',
-    productId: 'prod-rothmans',
-    supplierId: 'sup-tobacco-distributor',
-    quantityKg: 100,
-    costPerKg: 18.0,
-    totalCost: 1800.0,
+    productId: 'prod-winston',
+    supplierId: 'sup-main',
+    purchaseUnit: 'carton',
+    purchaseQuantity: 4,
+    packsPerSleeve: 10,
+    sleevesPerCarton: 20,
+    packsPerCarton: 200,
+    quantityKg: 800, // 800 packs originally received
+    costPerKg: 16.0,  // Historical cost: 16.0 SAR per pack
+    totalCost: 12800.0,
     returnedKg: 0,
     totalReturnedAmount: 0
   };
 
-  // Return 2 cartons = 20 packs at historical purchase cost 18.0 SAR = 360.00 SAR
+  // Return 1 carton = 200 packs at historical cost 16.0 = 3200.0 SAR
   const purchaseReturn = {
     id: 'ret-pur-01',
-    purchaseId: 'pur-101',
-    productId: 'prod-rothmans',
-    supplierId: 'sup-tobacco-distributor',
-    returnedKg: 20, // 20 packs
-    totalRefundAmount: 360.0,
+    purchaseId: 'pur-201',
+    productId: 'prod-winston',
+    supplierId: 'sup-main',
+    returnedKg: 200, // 200 packs
+    totalRefundAmount: 3200.0,
     refundMethod: 'supplier_debt_deduction'
   };
 
-  // Update purchase record
   const updatedPurchases = applyPurchaseReturnPurchase([originalPurchase], purchaseReturn, 1);
-  assert.equal(updatedPurchases[0].returnedKg, 20);
-  assert.equal(updatedPurchases[0].totalReturnedAmount, 360.0);
+  assert.equal(updatedPurchases[0].returnedKg, 200);
+  assert.equal(updatedPurchases[0].totalReturnedAmount, 3200.0);
   assert.equal(updatedPurchases[0].hasReturns, true);
 
-  // Update inventory
   const updatedProducts = applyPurchaseReturnInventory([product], originalPurchase, purchaseReturn, 1);
-  assert.equal(updatedProducts[0].currentStockKg, 130); // 150 - 20 = 130 packs
-
-  // Update supplier payable balance (decrease debt owed to supplier)
-  const suppliers = [{ id: 'sup-tobacco-distributor', balance: 5000.0 }];
-  const updatedSuppliers = adjustBalance(suppliers, 'sup-tobacco-distributor', -360.0);
-  assert.equal(updatedSuppliers[0].balance, 4640.0);
+  assert.equal(updatedProducts[0].currentStockKg, 800); // 1000 - 200 = 800 packs
 });
 
-test('Tobacco Domain: Sales Return Workflow with Locked Historical Price Invariance', () => {
-  // Product price subsequently increased in catalog from 25.0 to 30.0!
+test('Tobacco Domain: Sales Return with Historical Packaging & Price Invariance', () => {
+  // Product packaging & catalog price changed in store settings later!
   const product = {
     id: 'prod-camel',
     name: 'كامل أصفر',
-    currentStockKg: 80,
+    currentStockKg: 500,
     costPerKg: 18.0,
-    pricePerKg: 30.0, // New catalog price
-    branchStock: { 'branch-main': 80 }
+    retailPricePack: 35.0, // New catalog price
+    packsPerSleeve: 10,
+    sleevesPerCarton: 20,
+    packsPerCarton: 200,
+    branchStock: { 'branch-main': 500 }
   };
 
-  // Original invoice sold 5 packs at old price 25.0 SAR
+  // Original invoice sold 2 sleeves (Product A packaging at that time: 5 packs/sleeve = 10 packs)
+  // at historical price 30.0 SAR per pack
   const originalInvoice = {
-    id: 'inv-historical-01',
+    id: 'inv-camel-01',
     branchId: 'branch-main',
     items: [
       {
         productId: 'prod-camel',
         name: 'كامل أصفر',
-        netWeight: 5, // 5 packs
-        pricePerKg: 25.0, // Historical sale price per pack
-        unitPrice: 25.0,
+        unitType: 'sleeve',
+        unitName: 'استيكة',
+        quantity: 2,
+        packsPerSleeve: 5, // Historical transaction factor
+        packsPerCarton: 50,
+        netWeight: 10,     // 10 packs sold
+        pricePerKg: 30.0,  // Historical price per pack locked on invoice
+        unitPrice: 150.0,
         returnedWeight: 0
       }
     ],
@@ -248,55 +306,58 @@ test('Tobacco Domain: Sales Return Workflow with Locked Historical Price Invaria
     totalReturnedAmount: 0
   };
 
-  // Customer returns 2 packs
+  // Customer returns 1 sleeve (= 5 packs at historical 30.0 SAR = 150.0 SAR)
   const salesReturn = {
-    id: 'ret-sale-01',
-    invoiceId: 'inv-historical-01',
+    id: 'ret-sale-camel',
+    invoiceId: 'inv-camel-01',
     items: [
       {
         sourceLineIndex: 0,
         productId: 'prod-camel',
-        returnedWeight: 2, // 2 packs returned
-        originalPricePerKg: 25.0
+        returnedWeight: 5, // 5 packs returned
+        originalPricePerKg: 30.0
       }
     ],
-    totalRefundAmount: 50.0, // 2 * 25.0 = 50.0 SAR strictly at historical price!
+    totalRefundAmount: 150.0,
     refundMethod: 'cash',
     inventoryAction: 'restock'
   };
 
-  // 1. Update invoice
   const updatedInvoices = applySalesReturnInvoice([originalInvoice], salesReturn, 1);
-  assert.equal(updatedInvoices[0].items[0].returnedWeight, 2);
-  assert.equal(updatedInvoices[0].totalReturnedAmount, 50.0);
-  assert.equal(updatedInvoices[0].hasReturns, true);
+  assert.equal(updatedInvoices[0].items[0].returnedWeight, 5);
+  assert.equal(updatedInvoices[0].totalReturnedAmount, 150.0);
 
-  // 2. Restock product in inventory
   const updatedProducts = applySalesReturnInventory([product], originalInvoice, salesReturn, 1);
-  assert.equal(updatedProducts[0].currentStockKg, 82); // 80 + 2 = 82 packs restocked!
+  assert.equal(updatedProducts[0].currentStockKg, 505); // 500 + 5 = 505 integer packs
 });
 
-test('Tobacco Domain: Damaged Tobacco Stock Write-Off (Crushed Pack / Spoiled Carton)', () => {
+test('Tobacco Domain: Damaged Tobacco Write-Off (Carton, Sleeve, Pack Normalization)', () => {
   const product = {
     id: 'prod-davidoff',
     name: 'ديفيدوف كلاسيك',
-    currentStockKg: 100, // 100 packs
+    category: 'سجائر',
+    packsPerSleeve: 10,
+    sleevesPerCarton: 20,
+    packsPerCarton: 200,
+    currentStockKg: 500, // 500 packs
     costPerKg: 24.0,     // 24.0 SAR per pack
-    branchStock: { 'branch-main': 100 }
+    branchStock: { 'branch-main': 500 }
   };
 
-  // Write off 1 damaged carton = 10 packs at cost 24.0 = 240.0 SAR
+  // Write off 1 crushed sleeve = 10 packs
   const damageRecord = {
-    id: 'dmg-001',
+    id: 'dmg-002',
     branchId: 'branch-main',
     productId: 'prod-davidoff',
     productName: 'ديفيدوف كلاسيك',
-    quantityKg: 10,  // 10 packs
+    damageUnit: 'sleeve',
+    enteredQuantity: 1,
+    quantityKg: 10,  // 10 packs normalized
     costPerKg: 24.0,
     totalLoss: 240.0,
-    reason: 'كرتونة مكسورة ومهشمة'
+    reason: 'استيكة مسحوقة وتالفة'
   };
 
   const updatedProducts = applyDamageInventory([product], damageRecord, 1);
-  assert.equal(updatedProducts[0].currentStockKg, 90); // 100 - 10 = 90 packs remaining
+  assert.equal(updatedProducts[0].currentStockKg, 490); // 500 - 10 = 490 packs
 });

@@ -21,15 +21,15 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
       // Base ledger unit is packs (in netWeight or packsCount or quantity)
       const soldPacks = Number(it.packsCount ?? it.netWeight ?? it.grossWeight ?? it.quantity ?? 0);
       const alreadyReturnedPacks = Number(it.returnedWeight || 0);
-      const maxAvailablePacks = Math.max(0, Math.round((soldPacks - alreadyReturnedPacks) * 100) / 100);
+      const maxAvailablePacks = Math.max(0, Math.round((soldPacks - alreadyReturnedPacks)));
       
-      const unitType = it.unitType || (it.unit === 'كرتونة' ? 'carton' : it.unit === 'سيجارة' || it.unit === 'حبة' ? 'piece' : 'pack');
-      const unitName = it.unitName || it.unit || (unitType === 'carton' ? 'كرتونة' : unitType === 'piece' ? 'سيجارة' : 'علبة');
-      const packsPerCarton = Number(it.packsPerCarton || 10);
-      const unitsPerPack = Number(it.unitsPerPack || 20);
+      const unitType = it.unitType || (it.unit === 'كرتونة' ? 'carton' : it.unit === 'استيكة' ? 'sleeve' : 'pack');
+      const unitName = it.unitName || it.unit || (unitType === 'carton' ? 'كرتونة' : unitType === 'sleeve' ? 'استيكة' : 'علبة');
+      const packsPerSleeve = Number(it.packsPerSleeve || 10);
+      const sleevesPerCarton = Number(it.sleevesPerCarton || (it.packsPerCarton ? Math.max(1, Math.round(it.packsPerCarton / packsPerSleeve)) : 20));
+      const packsPerCarton = Number(it.packsPerCarton || (packsPerSleeve * sleevesPerCarton));
 
-      // Historical unit price locked on invoice
-      // Notice: pricePerKg in invoice line item is locked price per pack!
+      // Historical unit price locked on invoice line
       const historicalPricePerPack = Number(it.pricePerKg ?? (it.unitPrice && unitType === 'pack' ? it.unitPrice : 0));
       const lockedUnitPrice = Number(it.unitPrice ?? historicalPricePerPack);
 
@@ -39,11 +39,11 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
       let alreadyReturnedUnits = alreadyReturnedPacks;
       let maxAvailableUnits = maxAvailablePacks;
       if (unitType === 'carton' && packsPerCarton > 0) {
-        alreadyReturnedUnits = Math.round((alreadyReturnedPacks / packsPerCarton) * 100) / 100;
-        maxAvailableUnits = Math.round((maxAvailablePacks / packsPerCarton) * 100) / 100;
-      } else if (unitType === 'piece' && unitsPerPack > 0) {
-        alreadyReturnedUnits = Math.round(alreadyReturnedPacks * unitsPerPack);
-        maxAvailableUnits = Math.round(maxAvailablePacks * unitsPerPack);
+        alreadyReturnedUnits = Math.floor(alreadyReturnedPacks / packsPerCarton);
+        maxAvailableUnits = Math.floor(maxAvailablePacks / packsPerCarton);
+      } else if (unitType === 'sleeve' && packsPerSleeve > 0) {
+        alreadyReturnedUnits = Math.floor(alreadyReturnedPacks / packsPerSleeve);
+        maxAvailableUnits = Math.floor(maxAvailablePacks / packsPerSleeve);
       }
 
       return {
@@ -51,8 +51,9 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
         name: it.name,
         unitType,
         unitName,
+        packsPerSleeve,
+        sleevesPerCarton,
         packsPerCarton,
-        unitsPerPack,
         soldQuantity,
         soldPacks,
         alreadyReturnedPacks,
@@ -79,7 +80,7 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
   const handleItemReturnChange = (index, value) => {
     setReturnItemsState(prev => prev.map((item, idx) => {
       if (idx !== index) return item;
-      const numVal = parseFloat(value);
+      const numVal = parseInt(value, 10);
       if (isNaN(numVal) || numVal < 0) {
         return { ...item, returnedUnits: '' };
       }
@@ -95,14 +96,16 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
     }));
   };
 
-  // Convert entered returned units to packs for ledger accounting
+  // Convert entered returned units to integer packs for ledger accounting
   const itemsWithPacks = returnItemsState.map(it => {
     const enteredUnits = Number(it.returnedUnits || 0);
     let packs = enteredUnits;
     if (it.unitType === 'carton') {
-      packs = Math.round(enteredUnits * it.packsPerCarton * 100) / 100;
-    } else if (it.unitType === 'piece' && it.unitsPerPack > 0) {
-      packs = Math.round((enteredUnits / it.unitsPerPack) * 100) / 100;
+      packs = Math.round(enteredUnits * it.packsPerCarton);
+    } else if (it.unitType === 'sleeve') {
+      packs = Math.round(enteredUnits * it.packsPerSleeve);
+    } else {
+      packs = Math.round(enteredUnits);
     }
     const refund = Math.round(packs * it.originalPricePerPack * 100) / 100;
     return { ...it, enteredUnits, returnedPacks: packs, refund };
@@ -228,7 +231,7 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
                           <div className="flex items-center gap-1">
                             <input
                               type="number"
-                              step={item.unitType === 'piece' ? '1' : '1'}
+                              step="1"
                               min="0"
                               max={item.maxAvailableUnits}
                               value={item.returnedUnits}

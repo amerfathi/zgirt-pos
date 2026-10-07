@@ -473,7 +473,7 @@ export default function InvoicesHistory({ store, onViewReceipt, onViewA4Invoice 
                     {/* Items Chips Preview with exact historical price */}
                     <div className="flex flex-wrap gap-1.5 pb-1">
                       {(invoice.items || []).map((it, idx) => {
-                        const unitLabel = it.unitName || it.unit || (it.unitType === 'carton' ? 'كرتونة' : it.unitType === 'piece' ? 'سيجارة' : 'علبة');
+                        const unitLabel = it.unitName || it.unit || (it.unitType === 'carton' ? 'كرتونة' : it.unitType === 'sleeve' ? 'استيكة' : 'علبة');
                         const displayQty = it.quantity ?? it.netWeight ?? 1;
                         return (
                           <span key={idx} className="text-[10px] font-semibold bg-slate-50 text-slate-700 px-2 py-0.5 rounded-md border border-slate-200">

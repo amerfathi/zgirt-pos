@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { 
   Package, Plus, Edit2, Trash2, Check, Sparkles, 
   DollarSign, Tag, Barcode, Layers, Scissors, ShieldAlert,
-  Search, ArrowDownUp, RefreshCw
+  Search, ArrowDownUp, RefreshCw, Box
 } from 'lucide-react';
 import { formatCurrency } from '../utils/formatters';
 import { Button, Input, Select, Modal, EmptyState } from './ui';
+import { decomposePackStock } from '../../packages/core/src/packaging.js';
 
 export default function ProductsManagement({ store }) {
   const { products, settings, addProduct, updateProduct, updateProductPrice, deleteProduct } = store;
@@ -16,21 +17,28 @@ export default function ProductsManagement({ store }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
 
-  // Form state for tobacco product
+  // Form state for tobacco product with configurable packaging
   const [formData, setFormData] = useState({
     name: '',
     nameEn: '',
     brand: '',
     category: 'سجائر',
     barcodePack: '',
+    barcodeSleeve: '',
     barcodeCarton: '',
-    packsPerCarton: 10,
-    unitsPerPack: 20,
-    retailPricePack: 18.0,
-    retailPriceCarton: 180.0,
-    wholesalePriceCarton: 172.0,
+    packsPerSleeve: 10,
+    sleevesPerCarton: 20,
     costPerPack: 16.0,
-    stockPacks: 100,
+    costPerSleeve: 160.0,
+    costPerCarton: 3200.0,
+    retailPricePack: 18.0,
+    retailPriceSleeve: 180.0,
+    retailPriceCarton: 3600.0,
+    wholesalePriceSleeve: 175.0,
+    wholesalePriceCarton: 3450.0,
+    minStock: 20,
+    stockPacks: 200,
+    active: true,
     emoji: '🚬'
   });
 
@@ -62,8 +70,12 @@ export default function ProductsManagement({ store }) {
 
   const handleSavePrices = async (prod) => {
     if (isSavingProduct) return;
+    const pPerS = Number(prod.packsPerSleeve || prod.packs_per_sleeve || 10);
+    const sPerC = Number(prod.sleevesPerCarton || prod.sleeves_per_carton || 20);
+    const pPerC = Number(prod.packsPerCarton || prod.packs_per_carton || (pPerS * sPerC));
+
     const newRetail = tempRetailPrices[prod.id] !== undefined ? Number(tempRetailPrices[prod.id]) : (Number(prod.retail_price_pack_cents ? prod.retail_price_pack_cents / 100 : prod.retailPricePack || prod.defaultPricePerKg) || 0);
-    const newWholesale = tempWholesalePrices[prod.id] !== undefined ? Number(tempWholesalePrices[prod.id]) : (Number(prod.wholesale_price_carton_cents ? prod.wholesale_price_carton_cents / 100 : prod.wholesalePriceCarton) || (newRetail * (prod.packsPerCarton || 10)));
+    const newWholesale = tempWholesalePrices[prod.id] !== undefined ? Number(tempWholesalePrices[prod.id]) : (Number(prod.wholesale_price_carton_cents ? prod.wholesale_price_carton_cents / 100 : prod.wholesalePriceCarton) || (newRetail * pPerC * 0.95));
     
     setIsSavingProduct(true);
     try {
@@ -72,8 +84,9 @@ export default function ProductsManagement({ store }) {
         retailPricePack: newRetail,
         retail_price_pack_cents: Math.round(newRetail * 100),
         defaultPricePerKg: newRetail,
-        retailPriceCarton: Math.round(newRetail * (prod.packsPerCarton || 10) * 100) / 100,
-        retail_price_carton_cents: Math.round(newRetail * (prod.packsPerCarton || 10) * 100),
+        retailPriceSleeve: Math.round(newRetail * pPerS * 100) / 100,
+        retailPriceCarton: Math.round(newRetail * pPerC * 100) / 100,
+        retail_price_carton_cents: Math.round(newRetail * pPerC * 100),
         wholesalePriceCarton: newWholesale,
         wholesale_price_carton_cents: Math.round(newWholesale * 100)
       });
@@ -94,14 +107,21 @@ export default function ProductsManagement({ store }) {
       brand: '',
       category: 'سجائر',
       barcodePack: '',
+      barcodeSleeve: '',
       barcodeCarton: '',
-      packsPerCarton: 10,
-      unitsPerPack: 20,
-      retailPricePack: 18.0,
-      retailPriceCarton: 180.0,
-      wholesalePriceCarton: 172.0,
+      packsPerSleeve: 10,
+      sleevesPerCarton: 20,
       costPerPack: 16.0,
-      stockPacks: 100,
+      costPerSleeve: 160.0,
+      costPerCarton: 3200.0,
+      retailPricePack: 18.0,
+      retailPriceSleeve: 180.0,
+      retailPriceCarton: 3600.0,
+      wholesalePriceSleeve: 175.0,
+      wholesalePriceCarton: 3450.0,
+      minStock: 20,
+      stockPacks: 200,
+      active: true,
       emoji: '🚬'
     });
     setIsNewProductModalOpen(true);
@@ -109,11 +129,21 @@ export default function ProductsManagement({ store }) {
 
   const handleOpenEditModal = (prod) => {
     setEditingProduct(prod);
-    const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
+    const packsPerSleeve = Number(prod.packsPerSleeve || prod.packs_per_sleeve || 10);
+    const sleevesPerCarton = Number(prod.sleevesPerCarton || prod.sleeves_per_carton || (prod.packsPerCarton ? Math.max(1, Math.round(prod.packsPerCarton / packsPerSleeve)) : 20));
+    const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || (packsPerSleeve * sleevesPerCarton));
+
     const retailPack = Number(prod.retail_price_pack_cents ? prod.retail_price_pack_cents / 100 : (prod.retailPricePack || prod.defaultPricePerKg || 0));
+    const retailSleeve = Number(prod.retailPriceSleeve || (retailPack * packsPerSleeve));
     const retailCarton = Number(prod.retail_price_carton_cents ? prod.retail_price_carton_cents / 100 : (prod.retailPriceCarton || (retailPack * packsPerCarton)));
+
+    const wholesaleSleeve = Number(prod.wholesalePriceSleeve || (retailSleeve * 0.95));
     const wholesaleCarton = Number(prod.wholesale_price_carton_cents ? prod.wholesale_price_carton_cents / 100 : (prod.wholesalePriceCarton || (retailCarton * 0.95)));
+
     const costPack = Number(prod.cost_price_pack_cents ? prod.cost_price_pack_cents / 100 : (prod.costPerPack || prod.costPerKg || 0));
+    const costSleeve = Number(prod.costPerSleeve || (costPack * packsPerSleeve));
+    const costCarton = Number(prod.costPerCarton || (costPack * packsPerCarton));
+
     const stockPacks = Number(prod.stockPacks ?? prod.currentStockKg ?? 0);
 
     setFormData({
@@ -122,14 +152,21 @@ export default function ProductsManagement({ store }) {
       brand: prod.brand || '',
       category: prod.category || 'سجائر',
       barcodePack: prod.barcodePack || prod.barcode || '',
+      barcodeSleeve: prod.barcodeSleeve || '',
       barcodeCarton: prod.barcodeCarton || '',
-      packsPerCarton,
-      unitsPerPack: Number(prod.unitsPerPack || prod.units_per_pack || 20),
-      retailPricePack: retailPack,
-      retailPriceCarton: retailCarton,
-      wholesalePriceCarton: wholesaleCarton,
+      packsPerSleeve,
+      sleevesPerCarton,
       costPerPack: costPack,
+      costPerSleeve: costSleeve,
+      costPerCarton: costCarton,
+      retailPricePack: retailPack,
+      retailPriceSleeve: retailSleeve,
+      retailPriceCarton: retailCarton,
+      wholesalePriceSleeve: wholesaleSleeve,
+      wholesalePriceCarton: wholesaleCarton,
+      minStock: Number(prod.minStock || 20),
       stockPacks,
+      active: prod.active !== false,
       emoji: prod.emoji || '🚬'
     });
     setIsNewProductModalOpen(true);
@@ -138,19 +175,28 @@ export default function ProductsManagement({ store }) {
   const handleSaveProductForm = async () => {
     if (isSavingProduct) return;
     if (!formData.name) {
-      alert('يرجى كتابة اسم الصنف');
+      alert('يرجى كتابة اسم صنف التبغ');
       return;
     }
 
     setIsSavingProduct(true);
     try {
-      const packsPerCarton = Number(formData.packsPerCarton) || 10;
-      const unitsPerPack = Number(formData.unitsPerPack) || 20;
+      const packsPerSleeve = Math.max(1, Math.floor(Number(formData.packsPerSleeve) || 10));
+      const sleevesPerCarton = Math.max(1, Math.floor(Number(formData.sleevesPerCarton) || 20));
+      const packsPerCarton = packsPerSleeve * sleevesPerCarton;
+
       const retailPricePack = Number(formData.retailPricePack) || 0;
+      const retailPriceSleeve = Number(formData.retailPriceSleeve) || (retailPricePack * packsPerSleeve);
       const retailPriceCarton = Number(formData.retailPriceCarton) || (retailPricePack * packsPerCarton);
-      const wholesalePriceCarton = Number(formData.wholesalePriceCarton) || retailPriceCarton;
+
+      const wholesalePriceSleeve = Number(formData.wholesalePriceSleeve) || (retailPriceSleeve * 0.95);
+      const wholesalePriceCarton = Number(formData.wholesalePriceCarton) || (retailPriceCarton * 0.95);
+
       const costPerPack = Number(formData.costPerPack) || 0;
-      const stockPacks = Number(formData.stockPacks) || 0;
+      const costPerSleeve = Number(formData.costPerSleeve) || (costPerPack * packsPerSleeve);
+      const costPerCarton = Number(formData.costPerCarton) || (costPerPack * packsPerCarton);
+
+      const stockPacks = Math.max(0, Math.floor(Number(formData.stockPacks) || 0));
 
       const productPayload = {
         name: formData.name.trim(),
@@ -158,19 +204,28 @@ export default function ProductsManagement({ store }) {
         brand: formData.brand.trim(),
         category: formData.category,
         barcodePack: formData.barcodePack.trim(),
+        barcodeSleeve: formData.barcodeSleeve.trim(),
         barcodeCarton: formData.barcodeCarton.trim(),
+        packsPerSleeve,
+        packs_per_sleeve: packsPerSleeve,
+        sleevesPerCarton,
+        sleeves_per_carton: sleevesPerCarton,
         packsPerCarton,
         packs_per_carton: packsPerCarton,
-        unitsPerPack,
-        units_per_pack: unitsPerPack,
-        retailPricePack,
-        retail_price_pack_cents: Math.round(retailPricePack * 100),
-        retailPriceCarton,
-        retail_price_carton_cents: Math.round(retailPriceCarton * 100),
-        wholesalePriceCarton,
-        wholesale_price_carton_cents: Math.round(wholesalePriceCarton * 100),
         costPerPack,
         cost_price_pack_cents: Math.round(costPerPack * 100),
+        costPerSleeve,
+        costPerCarton,
+        retailPricePack,
+        retail_price_pack_cents: Math.round(retailPricePack * 100),
+        retailPriceSleeve,
+        retailPriceCarton,
+        retail_price_carton_cents: Math.round(retailPriceCarton * 100),
+        wholesalePriceSleeve,
+        wholesalePriceCarton,
+        wholesale_price_carton_cents: Math.round(wholesalePriceCarton * 100),
+        minStock: Number(formData.minStock) || 20,
+        active: formData.active !== false,
         // Backward compatibility for ledger engine:
         defaultPricePerKg: retailPricePack,
         costPerKg: costPerPack,
@@ -194,16 +249,15 @@ export default function ProductsManagement({ store }) {
     }
   };
 
-  // Carton Breaking action (فك كرتونة إلى علب منفردة)
+  // Carton Breaking action (فك كرتونة إلى استيكات وعلب)
   const handleExecuteBreakCarton = async () => {
     const prod = breakCartonModal.product;
     if (!prod) return;
-    const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
-    const currentPacks = Number(prod.stockPacks ?? prod.currentStockKg ?? 0);
+    const pPerS = Number(prod.packsPerSleeve || prod.packs_per_sleeve || 10);
+    const sPerC = Number(prod.sleevesPerCarton || prod.sleeves_per_carton || 20);
+    const packsPerCarton = pPerS * sPerC;
     
-    // Breaking a carton doesn't change total packs in base unit, but reconciles display carton counters
-    // and logs the physical unpacking for shelf replenishment.
-    alert(`تم فك كرتونة واحدة من (${prod.name}) إلى (${packsPerCarton}) علب بنجاح وتوفيرها على رف البيع القطاعي.`);
+    alert(`تم فك كرتونة واحدة من (${prod.name}) تعادل (${sPerC} استيكة / ${packsPerCarton} علبة) بنجاح وتوفيرها على رفوف البيع.`);
     setBreakCartonModal({ open: false, product: null });
   };
 
@@ -220,6 +274,7 @@ export default function ProductsManagement({ store }) {
       p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.brand?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.barcodePack?.includes(searchTerm) ||
+      p.barcodeSleeve?.includes(searchTerm) ||
       p.barcodeCarton?.includes(searchTerm) ||
       p.barcode?.includes(searchTerm);
     const matchesCategory = selectedCategory === 'all' || p.category === selectedCategory;
@@ -239,7 +294,7 @@ export default function ProductsManagement({ store }) {
             <div>
               <h1 className="text-base font-bold text-navy-850">إدارة أصناف التبغ والمخزون</h1>
               <p className="text-xs text-slate-500 font-medium">
-                هرمية التعبئة (كرتونة ⟵ علبة ⟵ حبة)، أسعار الجملة والقطاعي، والباركود
+                تعبئة مرنة لكل صنف (كرتونة ⟵ استيكة ⟵ علبة)، تسعير الجملة والتجزئة، والباركودات
               </p>
             </div>
           </div>
@@ -248,129 +303,128 @@ export default function ProductsManagement({ store }) {
             <button
               type="button"
               onClick={handleOpenAddModal}
-              className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+              className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
             >
               <Plus size={16} />
-              <span>إضافة صنف تبغ جديد</span>
+              <span>إضافة صنف جديد</span>
             </button>
           </div>
         </div>
 
-        {/* Filter and Search Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-slate-100">
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-            {categories.map(cat => (
-              <button
-                key={cat.id}
-                type="button"
-                onClick={() => setSelectedCategory(cat.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                  selectedCategory === cat.id 
-                    ? 'bg-primary-600 text-white font-bold shadow-2xs' 
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                }`}
-              >
-                {cat.label}
-              </button>
-            ))}
+        {/* View mode tabs & Category Filter */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-100">
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+            <button
+              type="button"
+              onClick={() => setActiveTab('inventory_pricing')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'inventory_pricing' 
+                  ? 'bg-white text-navy-850 shadow-xs' 
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              الجدول السريع والتسعير
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('all_products')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'all_products' 
+                  ? 'bg-white text-navy-850 shadow-xs' 
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              بطاقات الأصناف وهيكل التعبئة
+            </button>
           </div>
 
-          <div className="relative w-full sm:w-64">
-            <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          {/* Search Input */}
+          <div className="relative w-full sm:w-72">
+            <Search size={15} className="absolute right-3 top-2.5 text-slate-400" />
             <input
               type="text"
+              placeholder="بحث باسم الصنف، الماركة، أو الباركود..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="بحث بالاسم أو الباركود أو الماركة..."
-              className="w-full pr-9 pl-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-primary-500 focus:bg-white"
+              className="w-full pr-8.5 pl-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-primary-500"
             />
           </div>
-        </div>
-
-        {/* Navigation Tabs */}
-        <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-lg text-xs font-semibold">
-          <button
-            type="button"
-            onClick={() => setActiveTab('inventory_pricing')}
-            className={`py-2 rounded-md transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'inventory_pricing'
-                ? 'bg-white text-primary-700 shadow-2xs font-bold'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <DollarSign size={14} />
-            <span>تسعير الجملة والقطاعي السريع</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('all_products')}
-            className={`py-2 rounded-md transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'all_products'
-                ? 'bg-white text-primary-700 shadow-2xs font-bold'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Layers size={14} />
-            <span>بطاقات الأصناف وهرمية العبوات</span>
-          </button>
         </div>
       </div>
 
-      {/* Tab 1: Fast Pricing Sheet (Retail Pack & Wholesale Carton) */}
+      {/* Tab 1: Fast Table for Tobacco Pricing & Inventory */}
       {activeTab === 'inventory_pricing' && (
-        <div className="bg-white rounded-xl shadow-2xs border border-slate-200/90 overflow-hidden">
-          <div className="p-3 bg-amber-50/70 border-b border-amber-200/60 flex items-center justify-between text-xs">
-            <span className="text-amber-950 font-bold flex items-center gap-1.5">
-              <Sparkles size={14} className="text-amber-600" />
-              <span>جدول التسعير الموحد: عدّل سعر العلبة وسعر كرتونة الجملة واضغط حفظ</span>
-            </span>
-            <span className="text-[11px] text-slate-500 font-medium">العملة: {settings.currency}</span>
-          </div>
-
+        <div className="bg-white rounded-xl shadow-2xs border border-slate-200/80 overflow-hidden">
           {filteredProducts.length === 0 ? (
-            <EmptyState
-              icon={Package}
-              title="لا توجد أصناف مطابقة"
-              description="أضف أصناف السجائر والتبغ لبدء إدارة الأسعار والمخزون"
-              actionLabel="إضافة صنف جديد"
-              onAction={handleOpenAddModal}
-            />
+            <div className="p-8">
+              <EmptyState
+                icon={Package}
+                title="لا توجد أصناف مطابقة"
+                description="لم يتم العثور على أي صنف تبغ مطابق لمعايير البحث الحالية."
+                actionLabel="إضافة صنف تبغ"
+                onAction={handleOpenAddModal}
+              />
+            </div>
           ) : (
             <div className="divide-y divide-slate-100">
+              <div className="grid grid-cols-12 gap-2 px-4 py-2.5 bg-slate-50 text-[11px] font-bold text-slate-500">
+                <span className="col-span-4">صنف التبغ / الماركة</span>
+                <span className="col-span-3 text-center">المخزون (كرتونة / استيكة / علبة)</span>
+                <span className="col-span-5 text-left">الأسعار السريعة (علبة / كرتونة)</span>
+              </div>
+
               {filteredProducts.map(prod => {
-                const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
+                const pPerS = Number(prod.packsPerSleeve || prod.packs_per_sleeve || 10);
+                const sPerC = Number(prod.sleevesPerCarton || prod.sleeves_per_carton || 20);
+                const pPerC = Number(prod.packsPerCarton || prod.packs_per_carton || (pPerS * sPerC));
+
+                const stockPacks = Number(prod.stockPacks ?? prod.currentStockKg ?? 0);
+                const stockDecomp = decomposePackStock(stockPacks, prod);
+
                 const currentRetail = tempRetailPrices[prod.id] !== undefined 
                   ? tempRetailPrices[prod.id] 
-                  : (prod.retail_price_pack_cents ? prod.retail_price_pack_cents / 100 : (prod.retailPricePack || prod.defaultPricePerKg || 0));
-                const currentWholesale = tempWholesalePrices[prod.id] !== undefined
-                  ? tempWholesalePrices[prod.id]
-                  : (prod.wholesale_price_carton_cents ? prod.wholesale_price_carton_cents / 100 : (prod.wholesalePriceCarton || (currentRetail * packsPerCarton)));
+                  : (prod.retailPricePack || (prod.retail_price_pack_cents ? prod.retail_price_pack_cents / 100 : prod.defaultPricePerKg) || '');
+
+                const currentWholesale = tempWholesalePrices[prod.id] !== undefined 
+                  ? tempWholesalePrices[prod.id] 
+                  : (prod.wholesalePriceCarton || (prod.wholesale_price_carton_cents ? prod.wholesale_price_carton_cents / 100 : Math.round(Number(currentRetail) * pPerC * 0.95)) || '');
+
                 const isSaved = savedSuccessKey === prod.id;
-                const stockPacks = Number(prod.stockPacks ?? prod.currentStockKg ?? 0);
-                const stockCartons = Math.floor(stockPacks / packsPerCarton);
-                const remainderPacks = stockPacks % packsPerCarton;
 
                 return (
-                  <div key={prod.id} className="p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-slate-50 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl p-2 bg-slate-50 rounded-lg border border-slate-200/60">{prod.emoji || '🚬'}</span>
+                  <div key={prod.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-slate-50/60 transition-colors text-xs">
+                    
+                    {/* Col 1: Product Name & Category */}
+                    <div className="col-span-4 flex items-center gap-2">
+                      <span className="text-xl">{prod.emoji || '🚬'}</span>
                       <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-bold text-sm text-slate-900">{prod.name}</h3>
-                          {prod.brand && (
-                            <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium">{prod.brand}</span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          الكرتونة تحتوي: <strong className="text-slate-700">{packsPerCarton} علب</strong> • الرصيد: <strong className="text-emerald-700 font-mono">{stockCartons} كرتونة و {remainderPacks} علبة</strong>
-                        </p>
+                        <strong className="text-slate-900 block font-bold">{prod.name}</strong>
+                        <span className="text-[10px] text-slate-400">
+                          {prod.brand ? `${prod.brand} • ` : ''}{pPerS} علبة/استيكة • {sPerC} استيكة/كرتونة ({pPerC} علبة)
+                        </span>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 self-end md:self-auto">
+                    {/* Col 2: Stock decomposition */}
+                    <div className="col-span-3 text-center">
+                      <span className={`font-bold font-mono px-2 py-0.5 rounded text-xs inline-block ${
+                        stockPacks <= 0 
+                          ? 'bg-rose-100 text-rose-800' 
+                          : stockPacks <= (prod.minStock || 20) 
+                          ? 'bg-amber-100 text-amber-800' 
+                          : 'bg-emerald-100 text-emerald-800'
+                      }`}>
+                        {stockDecomp.formatted}
+                      </span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">
+                        إجمالي: {stockPacks} علبة
+                      </span>
+                    </div>
+
+                    {/* Col 3: Fast Price Edit & Save */}
+                    <div className="col-span-5 flex items-center justify-end gap-2">
                       <div className="flex items-center gap-1.5">
-                        <label className="text-[11px] text-slate-500 font-medium">سعر العلبة (قطاعي):</label>
+                        <label className="text-[11px] text-slate-500 font-medium">علبة:</label>
                         <input
                           type="number"
                           step="0.5"
@@ -412,14 +466,14 @@ export default function ProductsManagement({ store }) {
         </div>
       )}
 
-      {/* Tab 2: Full Product Cards with Tobacco Packaging Hierarchy */}
+      {/* Tab 2: Full Product Cards with Flexible Packaging Hierarchy */}
       {activeTab === 'all_products' && (
         filteredProducts.length === 0 ? (
           <div className="bg-white rounded-xl p-6 border border-slate-200/90 shadow-2xs">
             <EmptyState
               icon={Package}
               title="لا توجد أصناف في الدليل"
-              description="أضف أصناف التبغ وحدد عدد العلب في الكرتونة وأسعار الجملة والقطاعي"
+              description="أضف أصناف التبغ وحدد عدد العلب في الاستيكة والكرتونة وأسعار الجملة والقطاعي"
               actionLabel="إضافة صنف جديد"
               onAction={handleOpenAddModal}
             />
@@ -427,14 +481,18 @@ export default function ProductsManagement({ store }) {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
             {filteredProducts.map(prod => {
-              const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
+              const pPerS = Number(prod.packsPerSleeve || prod.packs_per_sleeve || 10);
+              const sPerC = Number(prod.sleevesPerCarton || prod.sleeves_per_carton || 20);
+              const pPerC = Number(prod.packsPerCarton || prod.packs_per_carton || (pPerS * sPerC));
+
               const retailPack = Number(prod.retail_price_pack_cents ? prod.retail_price_pack_cents / 100 : (prod.retailPricePack || prod.defaultPricePerKg || 0));
-              const retailCarton = Number(prod.retail_price_carton_cents ? prod.retail_price_carton_cents / 100 : (prod.retailPriceCarton || (retailPack * packsPerCarton)));
+              const retailSleeve = Number(prod.retailPriceSleeve || (retailPack * pPerS));
+              const retailCarton = Number(prod.retail_price_carton_cents ? prod.retail_price_carton_cents / 100 : (prod.retailPriceCarton || (retailPack * pPerC)));
               const wholesaleCarton = Number(prod.wholesale_price_carton_cents ? prod.wholesale_price_carton_cents / 100 : (prod.wholesalePriceCarton || (retailCarton * 0.95)));
               const costPack = Number(prod.cost_price_pack_cents ? prod.cost_price_pack_cents / 100 : (prod.costPerPack || prod.costPerKg || 0));
+              
               const stockPacks = Number(prod.stockPacks ?? prod.currentStockKg ?? 0);
-              const stockCartons = Math.floor(stockPacks / packsPerCarton);
-              const remainderPacks = stockPacks % packsPerCarton;
+              const stockDecomp = decomposePackStock(stockPacks, prod);
 
               return (
                 <div 
@@ -470,36 +528,37 @@ export default function ProductsManagement({ store }) {
                   {/* Packaging & Pricing Metrics */}
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 grid grid-cols-2 gap-2 text-xs">
                     <div>
+                      <span className="text-slate-500 text-[10px] block font-medium">سعر الاستيكة:</span>
+                      <strong className="text-slate-800 font-mono">{retailSleeve.toFixed(2)} {settings.currency}</strong>
+                    </div>
+                    <div>
                       <span className="text-slate-500 text-[10px] block font-medium">سعر كرتونة الجملة:</span>
                       <strong className="text-slate-800 font-mono">{wholesaleCarton.toFixed(2)} {settings.currency}</strong>
                     </div>
                     <div>
-                      <span className="text-slate-500 text-[10px] block font-medium">تكلفة العلبة (شراء):</span>
-                      <strong className="text-slate-700 font-mono">{costPack.toFixed(2)} {settings.currency}</strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 text-[10px] block font-medium">سعة الكرتونة:</span>
-                      <strong className="text-slate-800">{packsPerCarton} علب</strong>
+                      <span className="text-slate-500 text-[10px] block font-medium">هيكل التعبئة:</span>
+                      <strong className="text-slate-800">{pPerS} علبة/استيكة • {sPerC} استيكة/كرتونة ({pPerC} علبة)</strong>
                     </div>
                     <div>
                       <span className="text-slate-500 text-[10px] block font-medium">المخزون الحالي:</span>
                       <span className={`font-bold font-mono px-1.5 py-0.5 rounded text-[11px] inline-block ${
                         stockPacks <= 0 
                           ? 'bg-rose-100 text-rose-800' 
-                          : stockPacks <= 20 
+                          : stockPacks <= (prod.minStock || 20) 
                           ? 'bg-amber-100 text-amber-800' 
                           : 'bg-emerald-100 text-emerald-800'
                       }`}>
-                        {stockCartons} كرتونة ({stockPacks} علبة)
+                        {stockDecomp.formatted}
                       </span>
                     </div>
                   </div>
 
                   {/* Barcode pills */}
-                  {(prod.barcodePack || prod.barcodeCarton || prod.barcode) && (
-                    <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                  {(prod.barcodePack || prod.barcodeSleeve || prod.barcodeCarton || prod.barcode) && (
+                    <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500 font-mono">
                       <Barcode size={14} className="text-slate-400" />
                       <span>علبة: {prod.barcodePack || prod.barcode || '—'}</span>
+                      {prod.barcodeSleeve && <span>• استيكة: {prod.barcodeSleeve}</span>}
                       {prod.barcodeCarton && <span>• كرتونة: {prod.barcodeCarton}</span>}
                     </div>
                   )}
@@ -509,13 +568,13 @@ export default function ProductsManagement({ store }) {
                     <button
                       type="button"
                       onClick={() => setBreakCartonModal({ open: true, product: prod })}
-                      disabled={stockCartons < 1}
+                      disabled={stockDecomp.cartons < 1}
                       className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors ${
-                        stockCartons >= 1 
+                        stockDecomp.cartons >= 1 
                           ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer' 
                           : 'bg-slate-100 text-slate-400 cursor-not-allowed'
                       }`}
-                      title="فك كرتونة إلى علب منفردة لرف البيع"
+                      title="فك كرتونة إلى استيكات وعلب"
                     >
                       <Scissors size={13} />
                       <span>فك كرتونة للرف</span>
@@ -561,7 +620,7 @@ export default function ProductsManagement({ store }) {
               <input
                 type="text"
                 autoFocus
-                placeholder="مثال: مالبورو أحمر"
+                placeholder="مثال: مارلبورو أحمر"
                 value={formData.name}
                 onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -608,45 +667,60 @@ export default function ProductsManagement({ store }) {
             </div>
           </div>
 
-          {/* Packaging Hierarchy: Packs per Carton & Units per Pack */}
-          <div className="grid grid-cols-2 gap-2 bg-amber-50/50 p-2.5 rounded-xl border border-amber-200/60">
-            <div>
-              <label className="block text-[11px] font-bold text-amber-950 mb-1">عدد العلب في الكرتونة</label>
-              <input
-                type="number"
-                min="1"
-                value={formData.packsPerCarton}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  setFormData(prev => ({ 
-                    ...prev, 
-                    packsPerCarton: val,
-                    retailPriceCarton: prev.retailPricePack ? Math.round(prev.retailPricePack * val * 100) / 100 : prev.retailPriceCarton
-                  }));
-                }}
-                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
-              />
-            </div>
+          {/* Flexible Packaging Hierarchy */}
+          <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-200/70 space-y-2">
+            <h4 className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+              <Box size={14} className="text-amber-700" />
+              <span>هيكل التعبئة والتجزئة المخصص للصنف</span>
+            </h4>
+            
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-[11px] font-bold text-amber-950 mb-1">عدد العلب في الاستيكة *</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={formData.packsPerSleeve}
+                  onChange={(e) => {
+                    const val = Math.max(1, Math.floor(Number(e.target.value) || 1));
+                    setFormData(prev => ({ ...prev, packsPerSleeve: val }));
+                  }}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
+                />
+              </div>
 
-            <div>
-              <label className="block text-[11px] font-bold text-amber-950 mb-1">عدد الحبات في العلبة</label>
-              <input
-                type="number"
-                min="1"
-                value={formData.unitsPerPack}
-                onChange={(e) => setFormData(prev => ({ ...prev, unitsPerPack: Number(e.target.value) }))}
-                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
-              />
+              <div>
+                <label className="block text-[11px] font-bold text-amber-950 mb-1">عدد الاستيكات في الكرتونة *</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={formData.sleevesPerCarton}
+                  onChange={(e) => {
+                    const val = Math.max(1, Math.floor(Number(e.target.value) || 1));
+                    setFormData(prev => ({ ...prev, sleevesPerCarton: val }));
+                  }}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-amber-950 mb-1">إجمالي العلب بالكرتونة</label>
+                <div className="px-3 py-2 bg-amber-100/70 border border-amber-300 rounded-xl text-xs font-black text-amber-950 font-mono text-center">
+                  {(Number(formData.packsPerSleeve) || 10) * (Number(formData.sleevesPerCarton) || 20)} علبة
+                </div>
+              </div>
             </div>
           </div>
 
           {/* Multi-Level Barcodes */}
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">باركود العلبة (Pack Barcode)</label>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">باركود العلبة</label>
               <input
                 type="text"
-                placeholder="مسح باركود العلبة..."
+                placeholder="باركود العلبة..."
                 value={formData.barcodePack}
                 onChange={(e) => setFormData(prev => ({ ...prev, barcodePack: e.target.value }))}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -654,10 +728,21 @@ export default function ProductsManagement({ store }) {
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">باركود الكرتونة (Carton Barcode)</label>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">باركود الاستيكة</label>
               <input
                 type="text"
-                placeholder="مسح باركود الكرتونة..."
+                placeholder="باركود الاستيكة..."
+                value={formData.barcodeSleeve}
+                onChange={(e) => setFormData(prev => ({ ...prev, barcodeSleeve: e.target.value }))}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">باركود الكرتونة</label>
+              <input
+                type="text"
+                placeholder="باركود الكرتونة..."
                 value={formData.barcodeCarton}
                 onChange={(e) => setFormData(prev => ({ ...prev, barcodeCarton: e.target.value }))}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -665,7 +750,7 @@ export default function ProductsManagement({ store }) {
             </div>
           </div>
 
-          {/* Pricing: Retail Pack & Wholesale Carton */}
+          {/* Retail Pricing */}
           <div className="grid grid-cols-3 gap-2">
             <div>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">سعر العلبة (قطاعي)</label>
@@ -675,10 +760,13 @@ export default function ProductsManagement({ store }) {
                 value={formData.retailPricePack}
                 onChange={(e) => {
                   const val = Number(e.target.value);
+                  const pPerS = Number(formData.packsPerSleeve) || 10;
+                  const sPerC = Number(formData.sleevesPerCarton) || 20;
                   setFormData(prev => ({ 
                     ...prev, 
                     retailPricePack: val,
-                    retailPriceCarton: Math.round(val * prev.packsPerCarton * 100) / 100
+                    retailPriceSleeve: Math.round(val * pPerS * 100) / 100,
+                    retailPriceCarton: Math.round(val * pPerS * sPerC * 100) / 100
                   }));
                 }}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -686,7 +774,18 @@ export default function ProductsManagement({ store }) {
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">كرتونة (قطاعي)</label>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">سعر الاستيكة (قطاعي)</label>
+              <input
+                type="number"
+                step="0.5"
+                value={formData.retailPriceSleeve}
+                onChange={(e) => setFormData(prev => ({ ...prev, retailPriceSleeve: Number(e.target.value) }))}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">سعر الكرتونة (قطاعي)</label>
               <input
                 type="number"
                 step="1"
@@ -695,9 +794,23 @@ export default function ProductsManagement({ store }) {
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
               />
             </div>
+          </div>
+
+          {/* Wholesale Pricing */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">سعر الاستيكة (جملة)</label>
+              <input
+                type="number"
+                step="0.5"
+                value={formData.wholesalePriceSleeve}
+                onChange={(e) => setFormData(prev => ({ ...prev, wholesalePriceSleeve: Number(e.target.value) }))}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
+              />
+            </div>
 
             <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">كرتونة (جملة)</label>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">سعر الكرتونة (جملة)</label>
               <input
                 type="number"
                 step="1"
@@ -708,31 +821,49 @@ export default function ProductsManagement({ store }) {
             </div>
           </div>
 
-          {/* Stock in Packs & Cost per Pack */}
-          <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+          {/* Purchasing Costs & Stock */}
+          <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
             <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">المخزون المتوفر (إجمالي العلب)</label>
-              <input
-                type="number"
-                step="1"
-                placeholder="0"
-                value={formData.stockPacks !== undefined ? formData.stockPacks : ''}
-                onChange={(e) => setFormData(prev => ({ ...prev, stockPacks: Number(e.target.value) }))}
-                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
-              />
-              <span className="text-[10px] text-slate-400 mt-0.5 block">
-                يعادل: {Math.floor((Number(formData.stockPacks) || 0) / (Number(formData.packsPerCarton) || 10))} كرتونة
-              </span>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">تكلفة شراء العلبة ({settings.currency})</label>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">تكلفة العلبة (شراء)</label>
               <input
                 type="number"
                 step="0.5"
-                placeholder="0.00"
-                value={formData.costPerPack !== undefined ? formData.costPerPack : ''}
-                onChange={(e) => setFormData(prev => ({ ...prev, costPerPack: Number(e.target.value) }))}
+                value={formData.costPerPack}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  const pPerS = Number(formData.packsPerSleeve) || 10;
+                  const sPerC = Number(formData.sleevesPerCarton) || 20;
+                  setFormData(prev => ({
+                    ...prev,
+                    costPerPack: val,
+                    costPerSleeve: Math.round(val * pPerS * 100) / 100,
+                    costPerCarton: Math.round(val * pPerS * sPerC * 100) / 100
+                  }));
+                }}
+                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">المخزون (إجمالي العلب)</label>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={formData.stockPacks}
+                onChange={(e) => setFormData(prev => ({ ...prev, stockPacks: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
+                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">الحد الأدنى للتنبيه</label>
+              <input
+                type="number"
+                step="1"
+                min="1"
+                value={formData.minStock}
+                onChange={(e) => setFormData(prev => ({ ...prev, minStock: Number(e.target.value) }))}
                 className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
               />
             </div>
@@ -763,11 +894,11 @@ export default function ProductsManagement({ store }) {
       <Modal
         isOpen={breakCartonModal.open}
         onClose={() => setBreakCartonModal({ open: false, product: null })}
-        title="تأكيد فك كرتونة إلى علب رف البيع"
+        title="تأكيد فك كرتونة إلى استيكات وعلب"
       >
         <div className="space-y-3">
           <p className="text-xs text-slate-700 leading-relaxed">
-            سيتم فتح كرتونة مغلقة من الصنف <strong>({breakCartonModal.product?.name})</strong> وتفريغ محتواها البالغ <strong>{breakCartonModal.product?.packsPerCarton || 10} علب</strong> لبيعها قطاعياً على الرف المباشر.
+            سيتم فتح كرتونة مغلقة من الصنف <strong>({breakCartonModal.product?.name})</strong> وتفريغ محتواها البالغ <strong>{breakCartonModal.product?.packsPerCarton || ((breakCartonModal.product?.packsPerSleeve || 10) * (breakCartonModal.product?.sleevesPerCarton || 20))} علبة</strong> لبيعها كاستيكات وعلب مفردة على الرف.
           </p>
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
             <Button

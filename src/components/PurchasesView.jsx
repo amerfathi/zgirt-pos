@@ -114,7 +114,9 @@ export default function PurchasesView({ store, onOpenA4Report }) {
     }
 
     let effectiveProductName = '';
-    let effectivePacksPerCarton = 10;
+    let effectivePacksPerSleeve = 10;
+    let effectiveSleevesPerCarton = 20;
+    let effectivePacksPerCarton = 200;
     let isNewProd = false;
 
     if (itemSourceType === 'existing') {
@@ -124,30 +126,39 @@ export default function PurchasesView({ store, onOpenA4Report }) {
         return;
       }
       effectiveProductName = prod.name;
-      effectivePacksPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
+      effectivePacksPerSleeve = Number(prod.packsPerSleeve || prod.packs_per_sleeve || 10);
+      effectiveSleevesPerCarton = Number(prod.sleevesPerCarton || prod.sleeves_per_carton || (prod.packsPerCarton ? Math.max(1, Math.round(prod.packsPerCarton / effectivePacksPerSleeve)) : 20));
+      effectivePacksPerCarton = Number(prod.packsPerCarton || (effectivePacksPerSleeve * effectiveSleevesPerCarton));
     } else {
       if (!newProductName.trim()) {
         alert('يرجى كتابة اسم صنف التبغ الجديد');
         return;
       }
       effectiveProductName = newProductName.trim();
-      effectivePacksPerCarton = Number(newProductPacksPerCarton) || 10;
+      effectivePacksPerSleeve = 10;
+      effectiveSleevesPerCarton = Math.max(1, Math.round((Number(newProductPacksPerCarton) || 200) / 10));
+      effectivePacksPerCarton = Number(newProductPacksPerCarton) || (effectivePacksPerSleeve * effectiveSleevesPerCarton);
       isNewProd = true;
     }
 
-    // Determine normalized packs and cost per pack for the authoritative ledger
+    // Determine normalized integer packs and normalized cost per pack for the authoritative ledger
     let totalPacks = qty;
-    let costPerPack = Number(unitCost) || 0;
     let cartonsPurchased = 0;
+    let sleevesPurchased = 0;
 
     if (purchaseUnit === 'carton') {
       cartonsPurchased = qty;
-      totalPacks = qty * effectivePacksPerCarton;
-      costPerPack = Math.round((tCost / totalPacks) * 100) / 100;
+      totalPacks = Math.round(qty * effectivePacksPerCarton);
+    } else if (purchaseUnit === 'sleeve') {
+      sleevesPurchased = qty;
+      cartonsPurchased = Math.floor((qty * effectivePacksPerSleeve) / effectivePacksPerCarton);
+      totalPacks = Math.round(qty * effectivePacksPerSleeve);
     } else {
       cartonsPurchased = Math.floor(qty / effectivePacksPerCarton);
-      costPerPack = Number(unitCost) || (tCost / qty);
+      totalPacks = Math.round(qty);
     }
+
+    const normalizedCostPerPack = totalPacks > 0 ? Math.round((tCost / totalPacks) * 100) / 100 : Number(unitCost) || 0;
 
     const effectiveBank = bankName.trim() || 'تحويل بنكي';
     const targetSup = suppliers.find(s => s.id === selectedSupplierId);
@@ -161,16 +172,21 @@ export default function PurchasesView({ store, onOpenA4Report }) {
       isNewProduct: isNewProd,
       category: newProductCategory,
       brand: newProductBrand,
-      packsPerCarton: effectivePacksPerCarton,
-      purchaseUnit, // 'carton' | 'pack'
+      purchaseUnit, // 'carton' | 'sleeve' | 'pack'
       purchaseQuantity: qty,
+      packsPerSleeve: effectivePacksPerSleeve,
+      sleevesPerCarton: effectiveSleevesPerCarton,
+      packsPerCarton: effectivePacksPerCarton,
+      unitCost: Number(unitCost) || 0,
+      normalizedCostPerPack,
       cartonsCount: cartonsPurchased,
+      sleevesCount: sleevesPurchased,
       packsCount: totalPacks,
       // Ledger compatibility mappings:
-      quantityKg: totalPacks, // Authoritative packs stored in ledger
-      costPerKg: costPerPack,  // Authoritative cost per pack stored in ledger
+      quantityKg: totalPacks, // Authoritative integer packs stored in ledger
+      costPerKg: normalizedCostPerPack,  // Authoritative cost per pack stored in ledger
       packagesCount: cartonsPurchased || 1,
-      packageType: purchaseUnit === 'carton' ? 'كرتونة' : 'علبة',
+      packageType: purchaseUnit === 'carton' ? 'كرتونة' : purchaseUnit === 'sleeve' ? 'استيكة' : 'علبة',
       sellingPricePack: Number(newProductSellingPricePack) || 0,
       sellingPriceCarton: Number(newProductSellingPriceCarton) || 0,
       supplierId: targetSup ? targetSup.id : null,
@@ -797,6 +813,18 @@ export default function PurchasesView({ store, onOpenA4Report }) {
                   }`}
                 >
                   شراء بالكرتونة
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPurchaseUnit('sleeve');
+                    if (quantityInput && unitCost) setTotalCost((Number(quantityInput) * Number(unitCost)).toFixed(2));
+                  }}
+                  className={`px-2 py-0.5 rounded text-[11px] font-bold cursor-pointer ${
+                    purchaseUnit === 'sleeve' ? 'bg-amber-800 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  شراء بالاستيكة
                 </button>
                 <button
                   type="button"

@@ -7,10 +7,11 @@ function getItemQuantity(item) {
     return Number(item.packsCount);
   }
   if (item.unitType !== undefined && item.quantity !== undefined && Number.isFinite(Number(item.quantity))) {
-    const packsPerCarton = Number(item.packsPerCarton) || 10;
-    const unitsPerPack = Number(item.unitsPerPack) || 20;
+    const packsPerSleeve = Number(item.packsPerSleeve) || 10;
+    const sleevesPerCarton = Number(item.sleevesPerCarton) || 20;
+    const packsPerCarton = Number(item.packsPerCarton) || (packsPerSleeve * sleevesPerCarton);
     if (item.unitType === 'carton') return Number(item.quantity) * packsPerCarton;
-    if (item.unitType === 'piece') return Number(item.quantity) / unitsPerPack;
+    if (item.unitType === 'sleeve') return Number(item.quantity) * packsPerSleeve;
     return Number(item.quantity);
   }
   return Number(item.netWeight ?? item.grossWeight ?? item.quantity ?? 0);

@@ -15,18 +15,23 @@ export default function PurchaseReturnModal({ purchase, store, onClose, onSucces
   const hasSupplierDebt = purchase.paymentMethod === 'credit' || supplierBalance > 0;
 
   // Base ledger unit is Packs (stored in quantityKg / packsCount)
-  const packsPerCarton = Number(purchase.packsPerCarton || 10);
+  const packsPerSleeve = Number(purchase.packsPerSleeve || 10);
+  const sleevesPerCarton = Number(purchase.sleevesPerCarton || (purchase.packsPerCarton ? Math.max(1, Math.round(purchase.packsPerCarton / packsPerSleeve)) : 20));
+  const packsPerCarton = Number(purchase.packsPerCarton || (packsPerSleeve * sleevesPerCarton));
+
   const originalPacks = Number(purchase.packsCount || purchase.quantityKg || 0);
   const alreadyReturnedPacks = Number(purchase.returnedKg || 0);
-  const maxAvailablePacks = Math.max(0, Math.round((originalPacks - alreadyReturnedPacks) * 100) / 100);
+  const maxAvailablePacks = Math.max(0, Math.round((originalPacks - alreadyReturnedPacks)));
   const maxAvailableCartons = Math.floor(maxAvailablePacks / packsPerCarton);
+  const maxAvailableSleeves = Math.floor(maxAvailablePacks / packsPerSleeve);
 
   // CRITICAL: Strictly lock to historical cost per pack from the purchase bill!
   const historicalCostPerPack = Number(purchase.costPerKg || 0);
+  const historicalCostPerSleeve = Math.round(historicalCostPerPack * packsPerSleeve * 100) / 100;
   const historicalCostPerCarton = Math.round(historicalCostPerPack * packsPerCarton * 100) / 100;
 
-  // Tobacco unit selection: return by carton or pack
-  const [returnUnit, setReturnUnit] = useState(purchase.purchaseUnit === 'carton' ? 'carton' : 'pack');
+  // Tobacco unit selection: return by carton, sleeve, or pack
+  const [returnUnit, setReturnUnit] = useState(purchase.purchaseUnit === 'carton' ? 'carton' : purchase.purchaseUnit === 'sleeve' ? 'sleeve' : 'pack');
   const [returnQuantity, setReturnQuantity] = useState('');
   const [refundMethod, setRefundMethod] = useState(() => {
     if (purchase.paymentMethod === 'credit' || hasSupplierDebt) return 'supplier_debt_deduction';
@@ -37,16 +42,28 @@ export default function PurchaseReturnModal({ purchase, store, onClose, onSucces
   const [notes, setNotes] = useState('');
 
   const numEnteredQty = parseFloat(returnQuantity) || 0;
-  const numPacksToReturn = returnUnit === 'carton' ? numEnteredQty * packsPerCarton : numEnteredQty;
+  let numPacksToReturn = numEnteredQty;
+  if (returnUnit === 'carton') {
+    numPacksToReturn = Math.round(numEnteredQty * packsPerCarton);
+  } else if (returnUnit === 'sleeve') {
+    numPacksToReturn = Math.round(numEnteredQty * packsPerSleeve);
+  } else {
+    numPacksToReturn = Math.round(numEnteredQty);
+  }
+
   const calculatedRefund = Math.round(numPacksToReturn * historicalCostPerPack * 100) / 100;
 
   const maxAllowedForUnit = returnUnit === 'carton' 
     ? (packsPerCarton > 0 ? (maxAvailablePacks / packsPerCarton) : 0)
+    : returnUnit === 'sleeve'
+    ? (packsPerSleeve > 0 ? (maxAvailablePacks / packsPerSleeve) : 0)
     : maxAvailablePacks;
 
   const handleReturnAll = () => {
     if (returnUnit === 'carton') {
       setReturnQuantity(String(Math.floor(maxAvailablePacks / packsPerCarton)));
+    } else if (returnUnit === 'sleeve') {
+      setReturnQuantity(String(Math.floor(maxAvailablePacks / packsPerSleeve)));
     } else {
       setReturnQuantity(String(maxAvailablePacks));
     }
@@ -185,6 +202,7 @@ export default function PurchaseReturnModal({ purchase, store, onClose, onSucces
                   className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:outline-hidden focus:border-emerald-600"
                 >
                   <option value="carton">كرتونة ({packsPerCarton} علبة)</option>
+                  <option value="sleeve">استيكة ({packsPerSleeve} علبة)</option>
                   <option value="pack">علبة فردية</option>
                 </select>
               </div>

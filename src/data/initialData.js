@@ -25,7 +25,7 @@ export const INITIAL_SETTINGS = {
   defaultWeightMode: 'net_after_tare',
   defaultTareKg: 0, // وزن الفارغ
   defaultSaleMode: 'retail', // retail (قطاعي) | wholesale (جملة)
-  defaultUnitType: 'pack', // pack (علبة) | carton (كرتونة) | piece (سجارة)
+  defaultUnitType: 'pack', // pack (علبة) | sleeve (استيكة) | carton (كرتونة)
   weightPrecision: 2, // عدد الخانات العشرية
   nextInvoiceNumber: 1,
   openingCashDrawerFloat: 0, // العهدة النقدية الافتتاحية للدرج
