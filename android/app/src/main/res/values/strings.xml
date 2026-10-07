@@ -1,7 +1,8 @@
-<?xml version='1.0' encoding='utf-8'?>
+﻿<?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">براكه</string>
-    <string name="title_activity_main">براكه</string>
-    <string name="package_name">com.khodar.pos</string>
-    <string name="custom_url_scheme">com.khodar.pos</string>
+    <string name="app_name">زقيرت</string>
+    <string name="title_activity_main">زقيرت</string>
+    <string name="package_name">com.zgirt.pos</string>
+    <string name="custom_url_scheme">com.zgirt.pos</string>
 </resources>
+

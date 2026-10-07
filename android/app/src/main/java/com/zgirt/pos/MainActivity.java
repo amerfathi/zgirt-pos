@@ -1,4 +1,4 @@
-package com.khodar.pos;
+package com.zgirt.pos;
 
 import com.getcapacitor.BridgeActivity;
 

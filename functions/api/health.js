@@ -9,7 +9,7 @@ export async function onRequestGet(context) {
     system: 'زقيرت - كاشير ومحاسبة التبغ والجملة',
     edge: 'Cloudflare Pages & Workers',
     d1Connected: hasDb,
-    version: '2.6.1',
+    version: '2.6.14',
     timestamp: new Date().toISOString()
   }, null, 2), {
     headers: {
@@ -19,4 +19,5 @@ export async function onRequestGet(context) {
     }
   });
 }
+
 

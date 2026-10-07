@@ -1,4 +1,4 @@
-name = "zgirt-pos"
+﻿name = "zgirt-pos"
 compatibility_date = "2024-09-01"
 pages_build_output_dir = "./dist"
 
@@ -11,5 +11,4 @@ migrations_dir = "d1/migrations"
 
 [vars]
 ENVIRONMENT = "production"
-CASH_SHIFTS_ENABLED = "true"
-AUTH_SECRET = "zgirt_tobacco_pos_super_secure_master_secret_2026_production"
+CASH_SHIFTS_ENABLED = "false"

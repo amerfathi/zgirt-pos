@@ -1,4 +1,4 @@
-apply plugin: 'com.android.application'
+﻿apply plugin: 'com.android.application'
 
 def signingProperties = new Properties()
 def signingPropertiesFile = rootProject.file('keystore.properties')
@@ -7,13 +7,13 @@ if (signingPropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.khodar.pos"
+    namespace = "com.zgirt.pos"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.khodar.pos"
+        applicationId "com.zgirt.pos"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode project.hasProperty('brakaVersionCode') ? project.property('brakaVersionCode').toInteger() : 26140
+        versionCode project.hasProperty('zgirtVersionCode') ? project.property('zgirtVersionCode').toInteger() : 26140
         versionName "2.6.14"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -80,3 +80,4 @@ gradle.taskGraph.whenReady { graph ->
         throw new GradleException('Release signing is not configured. Provide ignored keystore.properties via CI secrets.')
     }
 }
+

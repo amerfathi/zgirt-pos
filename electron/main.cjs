@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+﻿const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 
 let mainWindow;
@@ -9,7 +9,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 720,
-    title: 'براكه - كاشير ومحاسبة',
+    title: 'زقيرت - كاشير ومحاسبة التبغ',
     icon: path.join(__dirname, 'icon.png'),
     frame: false, // Seamless frameless window (no white Windows titlebar)
     titleBarStyle: 'hidden',
@@ -123,7 +123,7 @@ ipcMain.handle('download-update', async (event) => {
   let partial;
   try {
     activeAbort = new AbortController();
-    const response = await fetch('https://khodar-pos.pages.dev/api/releases/latest?platform=windows&current='+app.getVersion(), {signal:AbortSignal.timeout(15000),redirect:'error'});
+    const response = await fetch('https://zgirt-pos-web-app.pages.dev/api/releases/latest?platform=windows&current='+app.getVersion(), {signal:AbortSignal.timeout(15000),redirect:'error'});
     if(!response.ok) throw new Error('Release service unavailable');
     const text = await response.text();
     if(text.length>65536) throw new Error('Manifest too large');
@@ -131,7 +131,7 @@ ipcMain.handle('download-update', async (event) => {
     // The pinned public key is supplied by the release owner. Missing key fails closed.
     const publicKey=await fs.promises.readFile(path.join(__dirname,'release-public-key.pem'),'utf8');
     const manifest=verifyManifest(data.signedManifest,publicKey,app.getVersion());
-    const dir=await fs.promises.mkdtemp(path.join(app.getPath('temp'),'braka-update-'));
+    const dir=await fs.promises.mkdtemp(path.join(app.getPath('temp'),'zgirt-update-'));
     partial=path.join(dir,'installer.partial');
     const stream=await download(manifest.url,activeAbort.signal);
     let count=0;
@@ -161,7 +161,7 @@ ipcMain.handle('install-update', async event=>{
     await verifyFile(verifiedUpdate.installer,verifiedUpdate.manifest);
     // Wait outside this process so NSIS cannot race our graceful Electron shutdown.
     await launchInstallerAfterAppExit(verifiedUpdate.installer, process.pid, {
-      helperPath: path.join(process.resourcesPath, 'Braka.UpdateHelper.exe'),
+      helperPath: path.join(process.resourcesPath, 'Zgirt.UpdateHelper.exe'),
       expectedHash: verifiedUpdate.manifest.sha256,
       journalDirectory: path.join(app.getPath('userData'), 'update-logs'),
     });
@@ -184,3 +184,4 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+
