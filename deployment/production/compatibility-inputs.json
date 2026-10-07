@@ -4,7 +4,7 @@
   "cashReplayReview": "Reviewed staged cash guards, strict invoice mutation policy and bounded legacy identity proof lookup. The production override shares invoice validation and the tenant-prefix legacy product reference proof, without guessing a branch or rewriting old sources. Cash denial remains and migrations0027/0028/0029 are not applied. Manual checkpoint migration0030 has no cash dependency; v2 progress/recovery requires explicit client negotiation, so old clients never mistake HTTP202 for a posted decision.",
   "sourceHashes": {
     "functions/_lib/syncPolicy.js": "e275667eacdf95eef30f129c37d07e19f940c13e804fed2c2c61b34d71b58310",
-    "functions/api/tenants/lookup.js": "adf613ac45e06da210eb0136577b4ee7812d57e95eb10f139070583dd7838748",
+    "functions/api/tenants/lookup.js": "f88eada9b8af14066eae15ad64314ef30a80cc06a552fc199cc037d271f49ef6",
     "functions/api/sync/push.js": "af96b6759a2ecb63c867784d0f05597874e13c0b218b21f5566769d9f4ab8419"
   }
 }
