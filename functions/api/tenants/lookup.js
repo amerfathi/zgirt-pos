@@ -1,4 +1,4 @@
-﻿/** Authentication endpoint. Store/user discovery is intentionally not exposed. */
+/** Authentication endpoint. Store/user discovery is intentionally not exposed. */
 import { badRequest, json, options, readJson } from '../../_lib/http.js';
 import { createSession } from '../../_lib/auth.js';
 import { verifyPassword } from '../../_lib/passwords.js';
@@ -24,8 +24,9 @@ export async function onRequestPost({ request, env }) {
     if (!tenant || tenant.status !== 'active' || (tenant.expires_at && tenant.expires_at.slice(0,10) < new Date().toISOString().slice(0,10))) return json({ success: false, error: 'Invalid sign-in details' }, 401);
 
     let principal = null;
+    const cryptoEnv = env?.PASSWORD_CRYPTO ? env : undefined;
     if (tenant.username.toLowerCase() === user) {
-      const result = await verifyPassword(password, tenant.password_hash, env);
+      const result = await verifyPassword(password, tenant.password_hash, cryptoEnv);
       if (result.valid) {
         const credentialVersion = Number(tenant.auth_version || 0) + (result.legacy ? 1 : 0);
         principal = { id: tenant.id, tenantId: tenant.id, type: 'tenant', role: tenant.role, credentialVersion };
@@ -34,7 +35,7 @@ export async function onRequestPost({ request, env }) {
     if (!principal) {
       const staff = await env.DB.prepare('SELECT * FROM users WHERE tenant_id = ? AND LOWER(username) = ? LIMIT 1').bind(tenant.id, user).first();
       if (staff?.status === 'active') {
-        const result = await verifyPassword(password, staff.password_hash, env);
+        const result = await verifyPassword(password, staff.password_hash, cryptoEnv);
         if (result.valid) {
           const credentialVersion = Number(staff.auth_version || 0) + (result.legacy ? 1 : 0);
           principal = { id: staff.id, tenantId: tenant.id, type: 'user', role: staff.role, credentialVersion, staff };

@@ -1,4 +1,4 @@
-﻿export const INITIAL_PRODUCTS = [];
+export const INITIAL_PRODUCTS = [];
 
 export const INITIAL_CUSTOMERS = [];
 
@@ -23,12 +23,14 @@ export const INITIAL_SETTINGS = {
   printCashierName: true, // طباعة اسم الكاشير
   printBranchName: true, // طباعة اسم الفرع
   defaultWeightMode: 'net_after_tare',
-  defaultTareKg: 0.5, // الوزن الفارغ الافتراضي للكرتون / الصندوق بالكيلو
-  weightPrecision: 2, // عدد الخانات العشرية للوزن (2 أو 3)
+  defaultTareKg: 0, // وزن الفارغ
+  defaultSaleMode: 'retail', // retail (قطاعي) | wholesale (جملة)
+  defaultUnitType: 'pack', // pack (علبة) | carton (كرتونة) | piece (سجارة)
+  weightPrecision: 2, // عدد الخانات العشرية
   nextInvoiceNumber: 1,
   openingCashDrawerFloat: 0, // العهدة النقدية الافتتاحية للدرج
   allowNegativeStock: false, // false: منع البيع عند نفاد الرصيد | true: السماح بالبيع على ذمة التوريد
-  defaultLowStockAlert: 15, // حد التنبيه الافتراضي لانخفاض المخزون (كجم)
+  defaultLowStockAlert: 20, // حد التنبيه الافتراضي لانخفاض المخزون (علبة)
   allowCashierDiscounts: true, // السماح للكاشير بإجراء خصومات يدوية
   maxDiscountPercent: 15, // الحد الأقصى المسموح للخصم (%)
   fontSizeScale: 100 // نسبة تكبير/تصغير خطوط البرنامج (80% إلى 130%)
@@ -45,11 +47,12 @@ export const INITIAL_WORKERS = [];
 export const INITIAL_CUSTOMER_PAYMENTS = [];
 
 export const INITIAL_EXPENSE_CATEGORIES = [
-  'عمالة يومية',
-  'نقل ومشال',
-  'كراتين وفارغ',
-  'فواتير ومحل',
-  'نثريات وصيانة',
+  'رواتب وعمالة',
+  'إيجار ومستودع',
+  'شحن وتوصيل كراتين',
+  'فواتير ومحل وكهرباء',
+  'ضيافة ونثريات',
+  'صيانة وتجهيزات',
   'أخرى'
 ];
 

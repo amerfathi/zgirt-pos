@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { 
-  Plus, Trash2, Edit3, Scale, User, UserPlus, 
+  Plus, Trash2, Edit3, User, UserPlus, 
   Receipt, Printer, Check, ShoppingBag, 
   RotateCcw, Sparkles, ChevronDown, Phone, ArrowRight, ShieldCheck, CreditCard,
   Landmark, ArrowUpDown, AlertTriangle, Settings as SettingsIcon, Package,
-  Banknote, Building2, FileText, Layers, CheckCircle2, Search, X
+  Banknote, Building2, FileText, Layers, CheckCircle2, Search, X, Barcode,
+  Scissors, Tag, Percent
 } from 'lucide-react';
-import { formatCurrency, formatWeight, getCurrentDateFormatted, getCurrentTimeFormatted, padInvoiceNumber } from '../utils/formatters';
-import WeightTallyModal from './WeightTallyModal';
+import { formatCurrency, getCurrentDateFormatted, getCurrentTimeFormatted, padInvoiceNumber } from '../utils/formatters';
 import { Button, Badge, Table, TableHeader, TableHead, TableBody, TableRow, TableCell, Modal, Input } from './ui';
+import { UNIT_TYPES, calculateLineItem, normalizeToPacks } from '../../packages/core/src/packaging.js';
 
 export default function SaleScreen({ 
   store, 
@@ -24,6 +24,9 @@ export default function SaleScreen({
   // Out of stock alert state for modal guidance
   const [outOfStockAlert, setOutOfStockAlert] = useState(null);
 
+  // Sale Mode: Retail (قطاعي) vs Wholesale (جملة)
+  const [saleMode, setSaleMode] = useState(settings.defaultSaleMode || 'retail'); // 'retail' | 'wholesale'
+
   // Invoice form state
   const [saleType, setSaleType] = useState('cash'); // 'cash' | 'bank' | 'credit' | 'split'
   const [bankName, setBankName] = useState('');
@@ -31,13 +34,14 @@ export default function SaleScreen({
   const [splitCash, setSplitCash] = useState('');
   const [splitBank, setSplitBank] = useState('');
   const [splitCredit, setSplitCredit] = useState('');
-  const [weightMode, setWeightMode] = useState(settings.defaultWeightMode || 'net_after_tare'); // 'net_after_tare' | 'gross'
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [productSearch, setProductSearch] = useState('');
+  const [barcodeScanInput, setBarcodeScanInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submittingRef = useRef(false);
+  const barcodeInputRef = useRef(null);
   
   // Current items in cart
   const [cartItems, setCartItems] = useState([]);
@@ -49,17 +53,15 @@ export default function SaleScreen({
     id: '',
     productId: '',
     name: '',
-    unit: 'صندوق',
-    packageCount: 1,
-    tarePerUnit: 2.0,
-    grossWeight: 0,
-    pricePerKg: 0,
-    costPerKg: 0,
-    weighings: [],
+    unitType: UNIT_TYPES.PACK, // 'carton' | 'pack' | 'piece'
+    unitName: 'علبة',
+    quantity: 1,
+    packsPerCarton: 10,
+    unitsPerPack: 20,
+    unitPrice: 0,
+    costPrice: 0,
+    discountAmount: 0
   });
-
-  // Scale multi-weighing modal state
-  const [isTallyModalOpen, setIsTallyModalOpen] = useState(false);
 
   // Totals and payments
   const [discountAmount, setDiscountAmount] = useState(0);
@@ -73,6 +75,10 @@ export default function SaleScreen({
       if (cust) {
         setCustomerName(cust.name);
         setCustomerPhone(cust.phone || '');
+        // If customer is wholesale customer, automatically switch to wholesale pricing
+        if (cust.customerType === 'wholesale' || cust.isWholesale) {
+          setSaleMode('wholesale');
+        }
       }
     } else if (selectedCustomerId === 'walk_in') {
       setCustomerName('زبون نقدي عام');
@@ -80,45 +86,125 @@ export default function SaleScreen({
     }
   }, [selectedCustomerId, customers]);
 
-  // Change weightMode and recalculate existing cart items
-  const handleWeightModeChange = (newMode) => {
-    setWeightMode(newMode);
-    setCartItems(prev => prev.map(item => {
-      const gross = Number(item.grossWeight) || 0;
-      const tare = Number(item.totalTareWeight) || 0;
-      const newNet = newMode === 'net_after_tare' ? Math.max(0, gross - tare) : gross;
-      const roundedNet = Math.round(newNet * 100) / 100;
-      const newTotal = Math.round(roundedNet * Number(item.pricePerKg) * 100) / 100;
-      return {
-        ...item,
-        netWeight: roundedNet,
-        total: newTotal
-      };
-    }));
+  // Handle Barcode Scanned Event (Instant Cart Insertion)
+  const handleBarcodeSubmit = (e) => {
+    e.preventDefault();
+    const barcode = barcodeScanInput.trim();
+    if (!barcode) return;
+
+    // Search by pack barcode, carton barcode, or general code
+    const matchedProduct = products.find(p => 
+      (p.barcodePack && p.barcodePack === barcode) ||
+      (p.barcodeCarton && p.barcodeCarton === barcode) ||
+      (p.barcode && p.barcode === barcode) ||
+      (p.id === barcode)
+    );
+
+    if (matchedProduct) {
+      const isCartonBarcode = matchedProduct.barcodeCarton === barcode;
+      const unitType = isCartonBarcode ? UNIT_TYPES.CARTON : UNIT_TYPES.PACK;
+      addItemToCartDirectly(matchedProduct, unitType, 1);
+      setBarcodeScanInput('');
+    } else {
+      alert(`الباركود (${barcode}) غير مسجل في قائمة أصناف التبغ.`);
+    }
   };
 
-  // Quick select vegetable to start adding
-  const handleSelectProduct = (prod) => {
-    setActiveItem({
-      id: '',
-      productId: prod.id,
-      name: prod.name,
-      unit: prod.defaultUnit || 'صندوق',
-      packageCount: 1,
-      tarePerUnit: prod.defaultTareWeight || 2.0,
-      grossWeight: 0,
-      pricePerKg: prod.defaultPricePerKg || 0,
-      costPerKg: Number(prod.costPerKg) || 0,
-      weighings: [],
+  // Helper to add item directly (from quick tap or barcode scan)
+  const addItemToCartDirectly = (prod, preferredUnit = UNIT_TYPES.PACK, initialQty = 1) => {
+    const isWholesale = saleMode === 'wholesale';
+    const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
+    const unitsPerPack = Number(prod.unitsPerPack || prod.units_per_pack || 20);
+
+    // Calculate pricing using core packaging rules
+    const pricing = calculateLineItem({
+      product: {
+        ...prod,
+        retail_price_pack_cents: prod.retail_price_pack_cents || Math.round((prod.retailPricePack || prod.defaultPricePerKg || 0) * 100),
+        retail_price_carton_cents: prod.retail_price_carton_cents || Math.round((prod.retailPriceCarton || (prod.retailPricePack * packsPerCarton) || 0) * 100),
+        wholesale_price_carton_cents: prod.wholesale_price_carton_cents || Math.round((prod.wholesalePriceCarton || (prod.retailPricePack * packsPerCarton * 0.95) || 0) * 100),
+        wholesale_price_pack_cents: prod.wholesale_price_pack_cents || Math.round((prod.wholesalePriceCarton ? prod.wholesalePriceCarton / packsPerCarton : (prod.retailPricePack || 0)) * 100)
+      },
+      unitType: preferredUnit,
+      quantity: initialQty,
+      isWholesale
     });
-    setEditingItemIndex(null);
-    setIsItemEditorOpen(true);
+
+    const unitPrice = pricing.unitPriceCents / 100;
+    const costPack = Number(prod.cost_price_pack_cents ? prod.cost_price_pack_cents / 100 : (prod.costPerPack || prod.costPerKg || 0));
+    const costPrice = preferredUnit === UNIT_TYPES.CARTON ? costPack * packsPerCarton : costPack;
+
+    // Check if same item & same unit already in cart
+    const existingIndex = cartItems.findIndex(it => it.productId === prod.id && it.unitType === preferredUnit);
+
+    if (existingIndex >= 0) {
+      // Increment quantity
+      const existing = cartItems[existingIndex];
+      const newQty = existing.quantity + initialQty;
+      const updatedPricing = calculateLineItem({
+        product: {
+          ...prod,
+          retail_price_pack_cents: prod.retail_price_pack_cents || Math.round((prod.retailPricePack || prod.defaultPricePerKg || 0) * 100),
+          retail_price_carton_cents: prod.retail_price_carton_cents || Math.round((prod.retailPriceCarton || 0) * 100),
+          wholesale_price_carton_cents: prod.wholesale_price_carton_cents || Math.round((prod.wholesalePriceCarton || 0) * 100)
+        },
+        unitType: preferredUnit,
+        quantity: newQty,
+        isWholesale
+      });
+
+      const updatedItem = {
+        ...existing,
+        quantity: newQty,
+        packsCount: updatedPricing.packsCount,
+        netWeight: updatedPricing.packsCount, // For backward compatibility with legacy sync engine
+        total: updatedPricing.totalCents / 100
+      };
+
+      setCartItems(prev => prev.map((it, idx) => idx === existingIndex ? updatedItem : it));
+    } else {
+      // Add new cart row
+      const newItem = {
+        id: `line-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        productId: prod.id,
+        name: prod.name,
+        brand: prod.brand || '',
+        unitType: preferredUnit,
+        unitName: preferredUnit === UNIT_TYPES.CARTON ? 'كرتونة' : preferredUnit === UNIT_TYPES.PIECE ? 'حبة' : 'علبة',
+        quantity: initialQty,
+        packsPerCarton,
+        unitsPerPack,
+        packsCount: pricing.packsCount,
+        netWeight: pricing.packsCount, // Backward compatibility for sync/store inventory subtraction
+        unitPrice,
+        pricePerKg: unitPrice, // For backward compatibility with legacy receipt/invoice schemas
+        costPrice,
+        costPerKg: costPrice,
+        total: pricing.totalCents / 100,
+        discountAmount: 0
+      };
+
+      setCartItems(prev => [newItem, ...prev]);
+    }
   };
 
-  // Open item editor for existing item
+  // Quick select tobacco product from catalog button
+  const handleSelectProduct = (prod) => {
+    // Default add 1 Pack directly to cart for speed, open editor on double click / edit button
+    addItemToCartDirectly(prod, UNIT_TYPES.PACK, 1);
+  };
+
+  // Open item editor for existing item or custom entry
   const handleEditItem = (index) => {
+    const it = cartItems[index];
     setEditingItemIndex(index);
-    setActiveItem({ ...cartItems[index] });
+    setActiveItem({
+      ...it,
+      unitType: it.unitType || UNIT_TYPES.PACK,
+      quantity: it.quantity || 1,
+      unitPrice: it.unitPrice || it.pricePerKg || 0,
+      costPrice: it.costPrice || it.costPerKg || 0
+    });
     setIsItemEditorOpen(true);
   };
 
@@ -127,91 +213,158 @@ export default function SaleScreen({
     setCartItems(prev => prev.filter((_, idx) => idx !== index));
   };
 
-  // Save / apply item into cart
-  const handleSaveItem = () => {
-    if (!activeItem.name || Number(activeItem.grossWeight) <= 0) {
-      alert('يرجى التأكد من إدخال اسم الصنف والوزن القائم بشكل صحيح');
+  // Toggle unit on an existing cart line (Carton <-> Pack)
+  const handleToggleCartLineUnit = (index) => {
+    const item = cartItems[index];
+    const nextUnit = item.unitType === UNIT_TYPES.PACK ? UNIT_TYPES.CARTON : UNIT_TYPES.PACK;
+    const prod = products.find(p => p.id === item.productId);
+    if (!prod) return;
+
+    const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
+    const isWholesale = saleMode === 'wholesale';
+    const pricing = calculateLineItem({
+      product: {
+        ...prod,
+        retail_price_pack_cents: prod.retail_price_pack_cents || Math.round((prod.retailPricePack || prod.defaultPricePerKg || 0) * 100),
+        retail_price_carton_cents: prod.retail_price_carton_cents || Math.round((prod.retailPriceCarton || (prod.retailPricePack * packsPerCarton) || 0) * 100),
+        wholesale_price_carton_cents: prod.wholesale_price_carton_cents || Math.round((prod.wholesalePriceCarton || 0) * 100)
+      },
+      unitType: nextUnit,
+      quantity: item.quantity,
+      isWholesale
+    });
+
+    const unitPrice = pricing.unitPriceCents / 100;
+    const costPack = Number(prod.cost_price_pack_cents ? prod.cost_price_pack_cents / 100 : (prod.costPerPack || prod.costPerKg || 0));
+    const costPrice = nextUnit === UNIT_TYPES.CARTON ? costPack * packsPerCarton : costPack;
+
+    const updated = {
+      ...item,
+      unitType: nextUnit,
+      unitName: nextUnit === UNIT_TYPES.CARTON ? 'كرتونة' : 'علبة',
+      unitPrice,
+      pricePerKg: unitPrice,
+      costPrice,
+      costPerKg: costPrice,
+      packsCount: pricing.packsCount,
+      netWeight: pricing.packsCount,
+      total: pricing.totalCents / 100
+    };
+
+    setCartItems(prev => prev.map((it, idx) => idx === index ? updated : it));
+  };
+
+  // Update quantity on cart line
+  const handleUpdateLineQty = (index, delta) => {
+    const item = cartItems[index];
+    const newQty = Math.max(1, item.quantity + delta);
+    if (newQty === item.quantity) return;
+
+    const prod = products.find(p => p.id === item.productId);
+    const isWholesale = saleMode === 'wholesale';
+    const pricing = calculateLineItem({
+      product: prod ? {
+        ...prod,
+        retail_price_pack_cents: prod.retail_price_pack_cents || Math.round((prod.retailPricePack || prod.defaultPricePerKg || 0) * 100),
+        retail_price_carton_cents: prod.retail_price_carton_cents || Math.round((prod.retailPriceCarton || 0) * 100),
+        wholesale_price_carton_cents: prod.wholesale_price_carton_cents || Math.round((prod.wholesalePriceCarton || 0) * 100)
+      } : {
+        retail_price_pack_cents: Math.round(item.unitPrice * 100),
+        packs_per_carton: item.packsPerCarton || 10
+      },
+      unitType: item.unitType,
+      quantity: newQty,
+      isWholesale
+    });
+
+    setCartItems(prev => prev.map((it, idx) => idx === index ? {
+      ...it,
+      quantity: newQty,
+      packsCount: pricing.packsCount,
+      netWeight: pricing.packsCount,
+      total: pricing.totalCents / 100
+    } : it));
+  };
+
+  // Save / apply item into cart from Modal
+  const handleSaveItemModal = () => {
+    if (!activeItem.name || Number(activeItem.quantity) <= 0) {
+      alert('يرجى التأكد من إدخال اسم الصنف والكمية');
       return;
     }
 
-    const packageCount = Number(activeItem.packageCount) || 1;
-    const tarePerUnit = Math.round(Number(activeItem.tarePerUnit || 0) * 100) / 100;
-    const totalTareWeight = Math.round(packageCount * tarePerUnit * 100) / 100;
-    const grossWeight = Math.round(Number(activeItem.grossWeight || 0) * 100) / 100;
+    const qty = Number(activeItem.quantity) || 1;
+    const unitPrice = Number(activeItem.unitPrice) || 0;
+    const total = Math.round(qty * unitPrice * 100) / 100;
+    const packsPerCarton = Number(activeItem.packsPerCarton) || 10;
+    const unitsPerPack = Number(activeItem.unitsPerPack) || 20;
 
-    // Net weight calculation
-    const calculatedNet = weightMode === 'net_after_tare' 
-      ? Math.max(0, grossWeight - totalTareWeight)
-      : grossWeight;
-    const netWeight = Math.round(calculatedNet * 100) / 100;
-
-    const pricePerKg = Math.round(Number(activeItem.pricePerKg || 0) * 100) / 100;
-    const total = Math.round(netWeight * pricePerKg * 100) / 100;
-
-    // Check stock availability if allowNegativeStock is false
-    const matchingProduct = products.find(p => 
-      (activeItem.productId && p.id === activeItem.productId) || 
-      (p.name.trim() === (activeItem.name || '').trim())
-    );
-
-    if (matchingProduct && !settings.allowNegativeStock) {
-      const currentStock = Number(matchingProduct.currentStockKg) || 0;
-      const alreadyInCart = cartItems
-        .filter((_, idx) => idx !== editingItemIndex)
-        .filter(it => (it.productId && it.productId === matchingProduct.id) || (it.name.trim() === matchingProduct.name.trim()))
-        .reduce((sum, it) => sum + (Number(it.netWeight) || 0), 0);
-      
-      const totalNeeded = Math.round((alreadyInCart + netWeight) * 100) / 100;
-      if (totalNeeded > currentStock) {
-        setOutOfStockAlert({
-          productName: activeItem.name,
-          currentStock: currentStock,
-          requestedWeight: totalNeeded,
-          availableLeft: Math.max(0, Math.round((currentStock - alreadyInCart) * 100) / 100)
-        });
-        return;
-      }
-    }
+    let packsCount = qty;
+    if (activeItem.unitType === UNIT_TYPES.CARTON) packsCount = qty * packsPerCarton;
+    else if (activeItem.unitType === UNIT_TYPES.PIECE) packsCount = qty / unitsPerPack;
 
     const finalizedItem = {
       ...activeItem,
-      id: activeItem.id || `item-${Date.now()}`,
-      productId: matchingProduct ? matchingProduct.id : (activeItem.productId || null),
-      costPerKg: matchingProduct ? (Number(matchingProduct.costPerKg) || 0) : (Number(activeItem.costPerKg) || 0),
-      packageCount,
-      tarePerUnit,
-      totalTareWeight,
-      grossWeight,
-      netWeight,
-      pricePerKg,
-      total,
-      weighingCount: activeItem.weighings && activeItem.weighings.length > 0 ? activeItem.weighings.length : 1
+      id: activeItem.id || `line-${Date.now()}`,
+      unitName: activeItem.unitType === UNIT_TYPES.CARTON ? 'كرتونة' : activeItem.unitType === UNIT_TYPES.PIECE ? 'حبة' : 'علبة',
+      quantity: qty,
+      unitPrice,
+      pricePerKg: unitPrice,
+      costPrice: Number(activeItem.costPrice) || 0,
+      costPerKg: Number(activeItem.costPrice) || 0,
+      packsCount,
+      netWeight: packsCount,
+      total
     };
 
     if (editingItemIndex !== null) {
       setCartItems(prev => prev.map((it, idx) => idx === editingItemIndex ? finalizedItem : it));
     } else {
-      setCartItems(prev => [...prev, finalizedItem]);
+      setCartItems(prev => [finalizedItem, ...prev]);
     }
 
     setIsItemEditorOpen(false);
     setEditingItemIndex(null);
   };
 
-  // Calculations for current invoice with exact rounding
-  const totalPackages = cartItems.reduce((sum, it) => sum + (Number(it.packageCount) || 0), 0);
-  const totalGrossWeight = Math.round(cartItems.reduce((sum, it) => sum + (Number(it.grossWeight) || 0), 0) * 100) / 100;
-  const totalTareWeight = Math.round(cartItems.reduce((sum, it) => sum + (Number(it.totalTareWeight) || 0), 0) * 100) / 100;
-  const totalNetWeight = Math.round(cartItems.reduce((sum, it) => sum + (Number(it.netWeight) || 0), 0) * 100) / 100;
-  const totalWeighingsCount = cartItems.reduce((sum, it) => sum + (Number(it.weighingCount) || 1), 0);
+  // Switch between Retail and Wholesale mode (recalculate cart prices)
+  const handleSaleModeToggle = (newMode) => {
+    setSaleMode(newMode);
+    const isWholesale = newMode === 'wholesale';
+    setCartItems(prev => prev.map(item => {
+      const prod = products.find(p => p.id === item.productId);
+      if (!prod) return item;
+      const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
+      const pricing = calculateLineItem({
+        product: {
+          ...prod,
+          retail_price_pack_cents: prod.retail_price_pack_cents || Math.round((prod.retailPricePack || prod.defaultPricePerKg || 0) * 100),
+          retail_price_carton_cents: prod.retail_price_carton_cents || Math.round((prod.retailPriceCarton || (prod.retailPricePack * packsPerCarton) || 0) * 100),
+          wholesale_price_carton_cents: prod.wholesale_price_carton_cents || Math.round((prod.wholesalePriceCarton || 0) * 100)
+        },
+        unitType: item.unitType,
+        quantity: item.quantity,
+        isWholesale
+      });
+      const unitPrice = pricing.unitPriceCents / 100;
+      return {
+        ...item,
+        unitPrice,
+        pricePerKg: unitPrice,
+        total: pricing.totalCents / 100
+      };
+    }));
+  };
 
+  // Invoice calculations
+  const totalItemsCount = cartItems.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+  const totalPacksSold = cartItems.reduce((sum, it) => sum + (Number(it.packsCount) || 0), 0);
   const subtotal = Math.round(cartItems.reduce((sum, it) => sum + (Number(it.total) || 0), 0) * 100) / 100;
   const discount = Math.round(Number(discountAmount || 0) * 100) / 100;
   const finalTotal = Math.round(Math.max(0, subtotal - discount) * 100) / 100;
 
   // Multi-Payment calculations
   const effectiveBankName = bankName.trim() || 'تحويل بنكي';
-
   const splitCashNum = Math.round(Number(splitCash || 0) * 100) / 100;
   const splitBankNum = Math.round(Number(splitBank || 0) * 100) / 100;
   const splitCreditNum = Math.round(Number(splitCredit || 0) * 100) / 100;
@@ -254,23 +407,23 @@ export default function SaleScreen({
   const handleSaveInvoice = async (printImmediately = false) => {
     if (submittingRef.current) return;
     if (cartItems.length === 0) {
-      alert('الفاتورة فارغة، يرجى إضافة أصناف أولاً');
+      alert('الفاتورة فارغة، يرجى إضافة أصناف سجائر أولاً');
       return;
     }
 
-    // Accounting Protection: Check if any item in cart exceeds stock when allowNegativeStock is false
+    // Tobacco inventory stock validation
     if (!settings.allowNegativeStock) {
       for (const it of cartItems) {
         const prod = products.find(p => (it.productId && p.id === it.productId) || (p.name.trim() === (it.name || '').trim()));
         if (prod) {
-          const curStock = Number(prod.currentStockKg) || 0;
-          const reqWeight = Number(it.netWeight) || 0;
-          if (reqWeight > curStock) {
+          const curStockPacks = Number(prod.stockPacks ?? prod.currentStockKg ?? 0);
+          const reqPacks = Number(it.packsCount || it.quantity || 0);
+          if (reqPacks > curStockPacks) {
             setOutOfStockAlert({
               productName: it.name,
-              currentStock: curStock,
-              requestedWeight: reqWeight,
-              availableLeft: curStock
+              currentStock: curStockPacks,
+              requestedWeight: reqPacks,
+              availableLeft: curStockPacks
             });
             return;
           }
@@ -284,11 +437,10 @@ export default function SaleScreen({
       }
     }
 
-    // Accounting Protection: Cannot sell on credit without customer name
     const effectiveName = customerName.trim() || (selectedCustomerId && selectedCustomerId !== 'walk_in' ? 'عميل' : 'زبون نقدي عام');
     const hasCreditDebt = saleType === 'credit' || calculatedCreditAmount > 0 || calculatedRemainingDebt > 0;
     if (hasCreditDebt && (effectiveName === 'زبون نقدي عام' || !effectiveName)) {
-      alert('تنبيه محاسبي مهم: هذه الفاتورة تحتوي على مبلغ آجل (دين). يرجى اختيار عميل مسجل أو كتابة اسم العميل لتثبيت الدين في حسابه.');
+      alert('تنبيه محاسبي: هذه الفاتورة تحتوي على مبلغ آجل (دين). يرجى اختيار عميل مسجل أو كتابة اسم العميل لتثبيت الدين في حسابه.');
       return;
     }
 
@@ -301,6 +453,7 @@ export default function SaleScreen({
         customerId: selectedCustomerId || (effectiveName !== 'زبون نقدي عام' ? `cust-walkin-${Date.now()}` : 'walk_in'),
         customerName: effectiveName,
         customerPhone: customerPhone || '',
+        saleMode, // 'retail' | 'wholesale'
         saleType,
         paymentMethod: saleType,
         bankName: (saleType === 'bank' || (saleType === 'split' && calculatedBankAmount > 0)) ? effectiveBankName : '',
@@ -308,13 +461,10 @@ export default function SaleScreen({
         cashAmount: calculatedCashAmount,
         bankAmount: calculatedBankAmount,
         creditAmount: calculatedCreditAmount,
-        weightMode,
         items: cartItems,
-        totalPackages,
-        totalGrossWeight,
-        totalTareWeight,
-        totalNetWeight,
-        totalWeighingsCount,
+        totalItemsCount,
+        totalPacksSold,
+        totalNetWeight: totalPacksSold, // Backward compatibility for reports
         subtotal,
         discountAmount: discount,
         finalTotal,
@@ -364,7 +514,10 @@ export default function SaleScreen({
     if (!productSearch || !productSearch.trim()) return true;
     const q = productSearch.trim().toLowerCase();
     return (p.name && p.name.toLowerCase().includes(q)) || 
-           (p.category && p.category.toLowerCase().includes(q));
+           (p.brand && p.brand.toLowerCase().includes(q)) ||
+           (p.category && p.category.toLowerCase().includes(q)) ||
+           (p.barcodePack && p.barcodePack.includes(q)) ||
+           (p.barcodeCarton && p.barcodeCarton.includes(q));
   });
 
   return (
@@ -374,287 +527,280 @@ export default function SaleScreen({
         
         {/* =========================================================================
             RIGHT COLUMN (Main Operations Area - 62% to 65% width on desktop)
-            Fast Vegetable Catalog + Active Weighed Items Data Table
+            Tobacco Catalog + Active Cart Table
            ========================================================================= */}
         <div className="w-full lg:flex-1 space-y-4">
           
-          {/* Top Operational Bar: Title, Search, Category Tabs & Custom Item Trigger */}
+          {/* Top Operational Bar: Title, Barcode Scanner, Mode Toggle */}
           <div className="bg-white rounded-xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-primary-50 text-primary-600 border border-primary-100 flex items-center justify-center shadow-2xs">
-                  <Package size={16} />
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 border border-amber-200 flex items-center justify-center shadow-2xs font-bold">
+                  <Package size={18} />
                 </div>
                 <div>
                   <h2 className="text-sm font-bold text-navy-850 leading-tight">
-                    الأصناف السريعة والميزان
+                    نقطة بيع التبغ والسجائر (POS)
                   </h2>
                   <p className="text-[11px] text-slate-500 font-medium">
-                    اختر الصنف لإدخال وزنه أو اضغط "وزن صنف مخصص"
+                    البيع بالعلبة أو الكرتونة، مسح الباركود، وتطبيق تسعير الجملة والقطاعي
                   </p>
                 </div>
               </div>
 
-              {/* Action Buttons: Live Search & Custom Item Button */}
-              <div className="flex items-center gap-2 flex-wrap justify-end">
-                <div className="relative w-40 sm:w-48">
-                  <Search size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={productSearch}
-                    onChange={(e) => setProductSearch(e.target.value)}
-                    placeholder="بحث في الأصناف..."
-                    className="w-full pr-8 pl-6 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-primary-500 focus:bg-white transition-all shadow-2xs"
-                  />
-                  {productSearch && (
-                    <button 
-                      type="button"
-                      onClick={() => setProductSearch('')}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
+              {/* Mode Toggle: Retail vs Wholesale */}
+              <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
                 <button
                   type="button"
-                  onClick={() => {
-                    setActiveItem({
-                      id: '',
-                      productId: '',
-                      name: '',
-                      unit: 'صندوق',
-                      packageCount: 1,
-                      tarePerUnit: 2.0,
-                      grossWeight: 0,
-                      pricePerKg: 0,
-                      costPerKg: 0,
-                      weighings: [],
-                    });
-                    setEditingItemIndex(null);
-                    setIsItemEditorOpen(true);
-                  }}
-                  className="px-3 py-1.5 bg-primary-600 hover:bg-primary-700 active:scale-98 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
+                  onClick={() => handleSaleModeToggle('retail')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    saleMode === 'retail' 
+                      ? 'bg-white text-primary-700 shadow-2xs' 
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
                 >
-                  <Plus size={15} />
-                  <span>+ وزن صنف مخصص</span>
+                  بيع قطاعي (مفرق)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaleModeToggle('wholesale')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    saleMode === 'wholesale' 
+                      ? 'bg-amber-600 text-white shadow-2xs' 
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  بيع جملة كراتين
                 </button>
               </div>
             </div>
 
-            {/* Fast Vegetable Grid */}
+            {/* Barcode Scanner Input & Live Search */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <form onSubmit={handleBarcodeSubmit} className="relative flex-1">
+                <Barcode size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input
+                  ref={barcodeInputRef}
+                  type="text"
+                  value={barcodeScanInput}
+                  onChange={(e) => setBarcodeScanInput(e.target.value)}
+                  placeholder="امسح باركود العلبة أو الكرتونة هنا واضغط Enter..."
+                  className="w-full pr-9 pl-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:bg-white transition-all shadow-2xs"
+                />
+              </form>
+
+              <div className="relative w-full sm:w-48">
+                <Search size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  placeholder="بحث بالاسم أو الماركة..."
+                  className="w-full pr-8 pl-6 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-primary-500 focus:bg-white transition-all shadow-2xs"
+                />
+                {productSearch && (
+                  <button 
+                    type="button"
+                    onClick={() => setProductSearch('')}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveItem({
+                    id: '',
+                    productId: '',
+                    name: '',
+                    unitType: UNIT_TYPES.PACK,
+                    unitName: 'علبة',
+                    quantity: 1,
+                    packsPerCarton: 10,
+                    unitsPerPack: 20,
+                    unitPrice: 0,
+                    costPrice: 0,
+                    discountAmount: 0
+                  });
+                  setEditingItemIndex(null);
+                  setIsItemEditorOpen(true);
+                }}
+                className="px-3.5 py-2 bg-primary-600 hover:bg-primary-700 active:scale-98 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Plus size={15} />
+                <span>+ صنف مخصص</span>
+              </button>
+            </div>
+
+            {/* Quick Tobacco Brands & Grid */}
             {filteredProducts.length === 0 ? (
               <div className="p-6 text-center border border-slate-200 rounded-xl bg-slate-50/50">
                 <p className="text-xs font-bold text-slate-700">
-                  {productSearch ? 'لا توجد أصناف مطابقة لبحثك' : 'لا توجد أصناف سريعة مسجلة حالياً في النظام'}
+                  {productSearch ? 'لا توجد أصناف مطابقة للبحث' : 'لا توجد أصناف سجائر مسجلة حالياً'}
                 </p>
                 <p className="text-[11px] text-slate-400 mt-1 max-w-md mx-auto">
-                  {productSearch 
-                    ? 'جرب البحث باسم صنف آخر أو اضغط زر مسح البحث.' 
-                    : 'يمكنك استخدام زر "وزن صنف مخصص" أعلاه لإدخال الصنف وسعره ووزنه مباشرة، أو تسجيل أصنافك من تبويب "الأصناف".'}
+                  أضف أصناف التبغ من قائمة "الأصناف" أو استخدم زر "+ صنف مخصص" أعلاه.
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-2.5">
-                {filteredProducts.map(prod => (
-                  <button
-                    key={prod.id}
-                    onClick={() => handleSelectProduct(prod)}
-                    className="bg-white hover:border-primary-400 border border-slate-200/80 rounded-lg p-2.5 flex flex-col justify-between text-right transition-all hover:shadow-2xs active:scale-95 group cursor-pointer"
-                  >
-                    <div className="flex items-start justify-between w-full mb-2">
-                      <span className="text-xl p-1 rounded-md bg-slate-50 group-hover:bg-primary-50 transition-colors">
-                        {prod.emoji || '🥬'}
-                      </span>
-                      <span className="text-[10px] text-slate-500 font-medium bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200/60">
-                        {prod.defaultUnit || 'كجم'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-navy-850 block truncate group-hover:text-primary-600">
-                        {prod.name}
-                      </span>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-xs font-mono font-bold text-slate-800 block">
-                          {Number(prod.defaultPricePerKg || 0).toFixed(2)} <span className="text-[10px] text-slate-400 font-normal">{settings.currency}</span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-2.5 max-h-56 overflow-y-auto p-1 scrollbar-none">
+                {filteredProducts.map(prod => {
+                  const packsPerCarton = Number(prod.packsPerCarton || prod.packs_per_carton || 10);
+                  const isWholesale = saleMode === 'wholesale';
+                  const displayPrice = isWholesale
+                    ? (prod.wholesale_price_carton_cents ? prod.wholesale_price_carton_cents / 100 : (prod.wholesalePriceCarton || (prod.retailPricePack * packsPerCarton * 0.95)))
+                    : (prod.retail_price_pack_cents ? prod.retail_price_pack_cents / 100 : (prod.retailPricePack || prod.defaultPricePerKg || 0));
+                  const displayUnit = isWholesale ? 'كرتونة' : 'علبة';
+
+                  return (
+                    <button
+                      key={prod.id}
+                      onClick={() => handleSelectProduct(prod)}
+                      className="bg-white hover:border-amber-400 border border-slate-200/80 rounded-xl p-2.5 flex flex-col justify-between text-right transition-all hover:shadow-2xs active:scale-95 group cursor-pointer"
+                    >
+                      <div className="flex items-start justify-between w-full mb-1.5">
+                        <span className="text-xl p-1 rounded-lg bg-slate-50 group-hover:bg-amber-50 transition-colors">
+                          {prod.emoji || '🚬'}
                         </span>
-                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold ${
-                          (Number(prod.currentStockKg) || 0) <= 0 
-                            ? 'bg-rose-50 text-rose-700 border border-rose-200/60'
-                            : (Number(prod.currentStockKg) || 0) <= 10
-                            ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
-                            : 'bg-emerald-50 text-emerald-800 border border-emerald-200/60'
-                        }`}>
-                          {(Number(prod.currentStockKg) || 0) <= 0 ? 'نفد (0)' : `${Number(prod.currentStockKg).toFixed(1)} كجم`}
+                        <span className="text-[10px] text-slate-500 font-bold bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200/60">
+                          {displayUnit}
                         </span>
                       </div>
-                    </div>
-                  </button>
-                ))}
+                      <div>
+                        <span className="text-xs font-bold text-navy-850 block truncate group-hover:text-primary-600">
+                          {prod.name}
+                        </span>
+                        <div className="flex items-center justify-between mt-1">
+                          <span className="text-xs font-mono font-bold text-emerald-700 block">
+                            {Number(displayPrice || 0).toFixed(2)} <span className="text-[10px] text-slate-400 font-normal">{settings.currency}</span>
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
 
-          {/* Active Cart Items Table Station */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 overflow-hidden">
+          {/* Active Cart Items Table */}
+          <div className="bg-white rounded-xl shadow-2xs border border-slate-200/80 overflow-hidden">
             <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
               <div className="flex items-center gap-2">
                 <ShoppingBag size={16} className="text-slate-700" />
                 <h3 className="text-xs font-black text-slate-900">
-                  قائمة الأصناف الموزونة في الفاتورة ({cartItems.length})
+                  قائمة أصناف الفاتورة ({cartItems.length})
                 </h3>
               </div>
 
               {cartItems.length > 0 && (
                 <div className="flex items-center gap-3 text-xs font-bold text-slate-600">
-                  <span>إجمالي الصافي: <strong className="text-slate-900 font-mono">{formatWeight(totalNetWeight)}</strong></span>
+                  <span>إجمالي العلب المسحوبة: <strong className="text-slate-900 font-mono">{totalPacksSold}</strong></span>
                   <span className="text-slate-300">•</span>
-                  <span>العبوات: <strong className="text-slate-900 font-mono">{totalPackages}</strong></span>
+                  <span>الأسطر: <strong className="text-slate-900 font-mono">{cartItems.length}</strong></span>
                 </div>
               )}
             </div>
 
             {cartItems.length === 0 ? (
               <div className="p-12 text-center text-slate-400">
-                <Scale size={36} className="mx-auto mb-2.5 opacity-25 text-slate-600" />
-                <p className="text-xs font-bold text-slate-600">الفاتورة فارغة حالياً</p>
+                <Package size={36} className="mx-auto mb-2.5 opacity-25 text-slate-600" />
+                <p className="text-xs font-bold text-slate-600">سلة الفاتورة فارغة حالياً</p>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  اختر صنفاً من الأصناف السريعة أعلاه أو اضغط "+ وزن صنف مخصص" لبدء الميزان
+                  اختر صنفاً من البطاقات السريعة أو امسح الباركود مباشرة
                 </p>
               </div>
             ) : (
               <div>
-                {/* Mobile Cards View (Visible on mobile screens) */}
-                <div className="md:hidden divide-y divide-slate-100">
-                  {cartItems.map((item, idx) => (
-                    <div key={item.id || idx} className="p-3.5 space-y-2 hover:bg-slate-50/70 transition-colors">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 text-xs font-bold font-mono flex items-center justify-center">
-                            {idx + 1}
-                          </span>
-                          <div>
-                            <span className="text-sm font-black text-slate-900 block">{item.name}</span>
-                            <span className="text-[11px] text-slate-500 font-medium">{item.packageCount} {item.unit}</span>
-                          </div>
-                        </div>
-
-                        <div className="text-left">
-                          <span className="text-base font-black font-mono text-slate-900 block">
-                            {Number(item.total).toFixed(2)} <span className="text-[10px] text-slate-400 font-normal">{settings.currency}</span>
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-mono">
-                            {Number(item.pricePerKg).toFixed(2)} {settings.currency}/كجم
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Weight Breakdown Pill */}
-                      <div className="grid grid-cols-3 gap-1 bg-slate-50 p-2 rounded-xl text-center border border-slate-100">
-                        <div>
-                          <span className="text-[9px] text-slate-400 block font-medium">قائم</span>
-                          <span className="text-xs font-mono font-bold text-slate-700">{formatWeight(item.grossWeight)}</span>
-                        </div>
-                        <div>
-                          <span className="text-[9px] text-slate-400 block font-medium">خصم فارغ</span>
-                          <span className="text-xs font-mono font-bold text-rose-600">-{formatWeight(item.totalTareWeight)}</span>
-                        </div>
-                        <div className="bg-emerald-100/60 rounded-lg py-0.5">
-                          <span className="text-[9px] text-emerald-800 block font-bold">صافي</span>
-                          <span className="text-xs font-mono font-black text-emerald-700">{formatWeight(item.netWeight)}</span>
-                        </div>
-                      </div>
-
-                      {/* Mobile Actions */}
-                      <div className="flex items-center justify-end gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => handleEditItem(idx)}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg flex items-center gap-1 active:scale-95 transition-all"
-                        >
-                          <Edit3 size={13} />
-                          <span>تعديل</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveItem(idx)}
-                          className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-lg flex items-center gap-1 active:scale-95 transition-all"
-                        >
-                          <Trash2 size={13} />
-                          <span>حذف</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
                 {/* Desktop & Tablet Table View */}
-                <div className="hidden md:block">
-                  <Table>
-                    <TableHeader>
-                      <tr>
-                        <TableHead align="center" className="w-10">#</TableHead>
-                        <TableHead align="right">الصنف والعبوة</TableHead>
-                        <TableHead align="right">الوزن القائم</TableHead>
-                        <TableHead align="right">خصم الفارغ</TableHead>
-                        <TableHead align="right">الوزن الصافي</TableHead>
-                        <TableHead align="right">سعر الكيلو</TableHead>
-                        <TableHead align="right">الإجمالي</TableHead>
-                        <TableHead align="center" className="w-20">إجراءات</TableHead>
-                      </tr>
-                    </TableHeader>
-                    <TableBody>
-                      {cartItems.map((item, idx) => (
-                        <TableRow key={item.id || idx}>
-                          <TableCell align="center" className="font-mono text-slate-400 font-semibold text-xs">
-                            {idx + 1}
-                          </TableCell>
-                          <TableCell align="right">
-                            <span className="font-bold text-slate-900 block">{item.name}</span>
-                            <span className="text-[10px] text-slate-500 font-medium">
-                              {item.packageCount} {item.unit}
-                            </span>
-                          </TableCell>
-                          <TableCell isNumeric align="right" className="font-mono font-bold text-slate-700">
-                            {formatWeight(item.grossWeight)}
-                          </TableCell>
-                          <TableCell isNumeric align="right" className="font-mono text-slate-500">
-                            {formatWeight(item.totalTareWeight)}
-                            <span className="text-[10px] text-slate-400 block font-sans">({item.tarePerUnit} كجم/عبوة)</span>
-                          </TableCell>
-                          <TableCell isNumeric align="right" className="font-mono font-bold text-navy-850">
-                            {formatWeight(item.netWeight)}
-                          </TableCell>
-                          <TableCell isNumeric align="right" className="font-mono font-medium text-slate-700">
-                            {Number(item.pricePerKg).toFixed(2)} {settings.currency}
-                          </TableCell>
-                          <TableCell isNumeric align="right" className="font-mono font-bold text-navy-850 text-sm">
-                            {Number(item.total).toFixed(2)} {settings.currency}
-                          </TableCell>
-                          <TableCell align="center">
-                            <div className="flex items-center justify-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleEditItem(idx)}
-                                icon={Edit3}
-                                title="تعديل"
-                              />
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleRemoveItem(idx)}
-                                icon={Trash2}
-                                className="text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                                title="حذف"
-                              />
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                <Table>
+                  <TableHeader>
+                    <tr>
+                      <TableHead align="center" className="w-10">#</TableHead>
+                      <TableHead align="right">الصنف</TableHead>
+                      <TableHead align="center">الوحدة (كرتونة/علبة)</TableHead>
+                      <TableHead align="center">الكمية</TableHead>
+                      <TableHead align="right">سعر الوحدة</TableHead>
+                      <TableHead align="right">الإجمالي</TableHead>
+                      <TableHead align="center" className="w-16">إجراء</TableHead>
+                    </tr>
+                  </TableHeader>
+                  <TableBody>
+                    {cartItems.map((item, idx) => (
+                      <TableRow key={item.id || idx}>
+                        <TableCell align="center" className="font-mono text-slate-400 text-xs">
+                          {idx + 1}
+                        </TableCell>
+                        <TableCell align="right">
+                          <span className="font-bold text-xs text-slate-900 block">{item.name}</span>
+                          {item.brand && <span className="text-[10px] text-slate-400">{item.brand}</span>}
+                        </TableCell>
+                        <TableCell align="center">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCartLineUnit(idx)}
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold border transition-colors cursor-pointer ${
+                              item.unitType === UNIT_TYPES.CARTON
+                                ? 'bg-amber-50 text-amber-900 border-amber-300'
+                                : 'bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                            title="اضغط للتحويل السريع بين كرتونة وعلبة"
+                          >
+                            {item.unitName || (item.unitType === UNIT_TYPES.CARTON ? 'كرتونة' : 'علبة')} ⟵
+                          </button>
+                        </TableCell>
+                        <TableCell align="center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateLineQty(idx, -1)}
+                              className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs cursor-pointer"
+                            >
+                              -
+                            </button>
+                            <span className="font-bold font-mono text-xs w-6 text-center">{item.quantity}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateLineQty(idx, 1)}
+                              className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs cursor-pointer"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </TableCell>
+                        <TableCell align="right" className="font-mono text-xs">
+                          {Number(item.unitPrice).toFixed(2)} {settings.currency}
+                        </TableCell>
+                        <TableCell align="right" className="font-mono font-bold text-xs text-navy-850">
+                          {Number(item.total).toFixed(2)} {settings.currency}
+                        </TableCell>
+                        <TableCell align="center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleEditItem(idx)}
+                              className="p-1 text-slate-400 hover:text-slate-600 rounded cursor-pointer"
+                              title="تعديل السعر أو الصنف"
+                            >
+                              <Edit3 size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(idx)}
+                              className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
+                              title="حذف السطر"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
             )}
           </div>
@@ -662,292 +808,159 @@ export default function SaleScreen({
         </div>
 
         {/* =========================================================================
-            LEFT COLUMN (Cashier & Checkout Sidebar - 35% to 38% width, sticky on desktop)
-            Invoice Meta, Customer, Payment Selector, Financial Breakdown & Checkout
+            LEFT COLUMN (Checkout Panel - 35% to 38% width on desktop)
+            Customer Details, Payment Selector, Net Totals, Submit & Print
            ========================================================================= */}
-        <div id="payment-section" className="w-full lg:w-[420px] xl:w-[460px] shrink-0 space-y-4 lg:sticky lg:top-16">
+        <div className="w-full lg:w-[380px] xl:w-[420px] flex-shrink-0 space-y-4">
           
-          {/* Card A: Invoice Meta, Customer & Payment Methods */}
+          {/* Card A: Customer and Payment Mode */}
           <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
             
-            {/* Header: Invoice Number & Date */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div>
-                <span className="text-[10px] font-semibold text-slate-400 block">رقم الفاتورة الحالية:</span>
-                <span className="font-mono font-bold text-base text-navy-850">
-                  #{padInvoiceNumber(settings.nextInvoiceNumber || 1)} <span className="text-xs">تسلسل محلي؛ المرجع الفريد يظهر بعد الحفظ</span>
-                </span>
-              </div>
-
-              <div className="text-left text-[11px] font-medium text-slate-500 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100 font-mono">
-                {getCurrentTimeFormatted()} • {getCurrentDateFormatted()}
-              </div>
-            </div>
-
             {/* Customer Selection */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="block text-[11px] font-semibold text-navy-850">
-                  العميل {saleType === 'credit' ? <span className="text-rose-600 font-bold">* (مطلوب للآجل)</span> : ''}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                  <User size={13} className="text-slate-500" />
+                  <span>العميل / المشتري</span>
                 </label>
-                {selectedCustomerId && selectedCustomerId !== 'walk_in' && (
-                  <span className="text-[10px] font-semibold text-slate-500">
-                    {(() => {
-                      const c = customers.find(x => x.id === selectedCustomerId);
-                      if (!c) return '';
-                      if (c.balance > 0) return <span className="text-amber-700 font-mono">دين سابق: {c.balance} {settings.currency}</span>;
-                      if (c.balance < 0) return <span className="text-primary-700 font-mono">رصيد: {Math.abs(c.balance)} {settings.currency}</span>;
-                      return <span className="text-emerald-700 font-semibold inline-flex items-center gap-1"><Check size={12} /> خالص</span>;
-                    })()}
-                  </span>
+                {onOpenNewCustomerModal && (
+                  <button
+                    type="button"
+                    onClick={onOpenNewCustomerModal}
+                    className="text-[10px] font-bold text-primary-600 hover:underline flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <UserPlus size={11} />
+                    <span>+ عميل جديد</span>
+                  </button>
                 )}
               </div>
 
-              <div className="flex gap-1.5">
-                <select
-                  value={selectedCustomerId}
-                  onChange={(e) => setSelectedCustomerId(e.target.value)}
-                  className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500 shadow-2xs"
-                >
-                  <option value="">-- زبون نقدي عام / كتابة اسم --</option>
-                  <option value="walk_in">زبون نقدي عام</option>
-                  {customers.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} {c.balance > 0 ? `(عليه ${c.balance} ${settings.currency})` : ''}
-                    </option>
-                  ))}
-                </select>
-
-                <button
-                  type="button"
-                  onClick={onOpenNewCustomerModal}
-                  className="px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors shrink-0 border border-slate-200 cursor-pointer shadow-2xs"
-                  title="إضافة عميل جديد"
-                >
-                  <UserPlus size={14} className="text-primary-500" />
-                  <span className="hidden sm:inline">جديد</span>
-                </button>
-              </div>
-
-              {/* Free write Customer name / phone */}
-              {(!selectedCustomerId || selectedCustomerId === 'walk_in' || saleType === 'credit') && (
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <input
-                    type="text"
-                    placeholder="اسم العميل..."
-                    value={customerName === 'زبون نقدي عام' && selectedCustomerId === 'walk_in' ? '' : customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-primary-500 shadow-2xs"
-                  />
-                  <input
-                    type="text"
-                    placeholder="رقم الهاتف (اختياري)..."
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-primary-500 shadow-2xs"
-                  />
-                </div>
-              )}
+              <select
+                value={selectedCustomerId}
+                onChange={(e) => setSelectedCustomerId(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="walk_in">زبون نقدي عام (مفرق)</option>
+                {customers.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} {c.phone ? `(${c.phone})` : ''} {c.balance ? `[رصيد: ${c.balance}]` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            {/* Weight Mode & Payment Method Selector */}
-            <div className="space-y-2 pt-2 border-t border-slate-100">
-              <div className="flex items-center justify-between">
-                <label className="block text-[11px] font-semibold text-navy-850">
-                  طريقة السداد:
-                </label>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-slate-500 font-medium">طريقة الوزن:</span>
-                  <select
-                    value={weightMode}
-                    onChange={(e) => handleWeightModeChange(e.target.value)}
-                    className="px-2 py-0.5 bg-white border border-slate-200 rounded-md text-[10px] font-semibold text-navy-850 shadow-2xs"
-                  >
-                    <option value="net_after_tare">صافي (خصم العبوة)</option>
-                    <option value="gross">قائم (شامل العبوة)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* 2x2 Payment Method Grid - Wafeq Coordinated Segmented Style */}
-              <div className="grid grid-cols-2 gap-1.5 text-xs font-semibold">
+            {/* Payment Method Selector */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1.5">طريقة السداد</label>
+              <div className="grid grid-cols-4 gap-1.5 text-xs font-medium">
                 <button
                   type="button"
                   onClick={() => setSaleType('cash')}
-                  className={`py-2 px-2.5 rounded-lg border text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  className={`py-2 px-1 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                     saleType === 'cash'
                       ? 'bg-primary-50 text-primary-700 border-primary-300 font-bold shadow-2xs'
                       : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200 shadow-2xs'
                   }`}
                 >
-                  <Banknote size={14} className={saleType === 'cash' ? 'text-primary-600' : 'text-slate-400'} />
-                  <span>نقدي (كاش)</span>
+                  <Banknote size={15} />
+                  <span>نقدي</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSaleType('bank')}
-                  className={`py-2 px-2.5 rounded-lg border text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  className={`py-2 px-1 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                     saleType === 'bank'
                       ? 'bg-primary-50 text-primary-700 border-primary-300 font-bold shadow-2xs'
                       : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200 shadow-2xs'
                   }`}
                 >
-                  <Building2 size={14} className={saleType === 'bank' ? 'text-primary-600' : 'text-slate-400'} />
-                  <span>تحويل بنكي</span>
+                  <CreditCard size={15} />
+                  <span>شبكة / بنك</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSaleType('credit')}
-                  className={`py-2 px-2.5 rounded-lg border text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  className={`py-2 px-1 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                     saleType === 'credit'
                       ? 'bg-primary-50 text-primary-700 border-primary-300 font-bold shadow-2xs'
                       : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200 shadow-2xs'
                   }`}
                 >
-                  <FileText size={14} className={saleType === 'credit' ? 'text-primary-600' : 'text-slate-400'} />
+                  <FileText size={15} />
                   <span>آجل (دين)</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSaleType('split')}
-                  className={`py-2 px-2.5 rounded-lg border text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  className={`py-2 px-1 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                     saleType === 'split'
                       ? 'bg-primary-50 text-primary-700 border-primary-300 font-bold shadow-2xs'
                       : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200 shadow-2xs'
                   }`}
                 >
-                  <Layers size={14} className={saleType === 'split' ? 'text-primary-600' : 'text-slate-400'} />
-                  <span>دفع مركب</span>
+                  <Layers size={15} />
+                  <span>مركب</span>
                 </button>
               </div>
 
-              {/* Bank Inputs (Clean Neutral Design) */}
-              {saleType === 'bank' && (
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 mt-2">
-                  <span className="text-[11px] font-bold text-navy-850 block">بيانات التحويل البنكي:</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">اسم البنك</label>
-                      <input
-                        type="text"
-                        placeholder="اكتب اسم البنك..."
-                        value={bankName}
-                        onChange={(e) => setBankName(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">رقم الحساب / الحوالة</label>
-                      <input
-                        type="text"
-                        placeholder="رقم العملية أو الإيصال..."
-                        value={bankAccountNumber}
-                        onChange={(e) => setBankAccountNumber(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Split Payment Distribution (Clean Neutral Design) */}
+              {/* Split Breakdown */}
               {saleType === 'split' && (
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5 mt-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-navy-850">توزيع السداد المركب:</span>
-                    <span className="font-bold font-mono text-[11px] text-slate-600">
-                      المتبقي: {splitDifference.toFixed(2)} {settings.currency}
-                    </span>
-                  </div>
-
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 mt-2">
                   <div className="grid grid-cols-3 gap-1.5 text-xs">
-                    <div className="bg-white p-2 rounded-lg border border-slate-200">
-                      <label className="block text-[10px] font-bold text-slate-600 mb-1">1. نقدي (كاش)</label>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">نقدي</label>
                       <input
                         type="number"
-                        inputMode="decimal"
                         placeholder="0.00"
                         value={splitCash}
                         onChange={(e) => setSplitCash(e.target.value)}
-                        className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
+                        className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs font-bold font-mono"
                       />
                     </div>
-
-                    <div className="bg-white p-2 rounded-lg border border-slate-200">
-                      <label className="block text-[10px] font-bold text-slate-600 mb-1">2. تحويل بنكي</label>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">بنكي</label>
                       <input
                         type="number"
-                        inputMode="decimal"
                         placeholder="0.00"
                         value={splitBank}
                         onChange={(e) => setSplitBank(e.target.value)}
-                        className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
+                        className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs font-bold font-mono"
                       />
                     </div>
-
-                    <div className="bg-white p-2 rounded-lg border border-slate-200">
-                      <label className="block text-[10px] font-bold text-slate-600 mb-1">3. آجل (دين)</label>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">آجل</label>
                       <input
                         type="number"
-                        inputMode="decimal"
                         placeholder="0.00"
                         value={splitCredit}
                         onChange={(e) => setSplitCredit(e.target.value)}
-                        className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
+                        className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs font-bold font-mono"
                       />
                     </div>
                   </div>
-
-                  {Number(splitBank) > 0 && (
-                    <div className="pt-2 border-t border-slate-200 grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">اسم البنك:</label>
-                        <input
-                          type="text"
-                          placeholder="اسم البنك..."
-                          value={bankName}
-                          onChange={(e) => setBankName(e.target.value)}
-                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">رقم الحساب:</label>
-                        <input
-                          type="text"
-                          placeholder="رقم الحساب..."
-                          value={bankAccountNumber}
-                          onChange={(e) => setBankAccountNumber(e.target.value)}
-                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                        />
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
 
           </div>
 
-          {/* Card B: Financial Totals & Checkout Station */}
+          {/* Card B: Totals & Checkout Actions */}
           <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
             
-            {/* Financial summary rows */}
             <div className="space-y-2 text-xs">
               <div className="flex justify-between text-slate-600 font-medium">
                 <span>المبلغ الإجمالي (قبل الخصم):</span>
                 <span className="font-bold text-navy-850 font-mono">{subtotal.toFixed(2)} {settings.currency}</span>
               </div>
 
-              {/* Discount row */}
               <div className="flex items-center justify-between">
                 <span className="text-slate-600 font-medium">قيمة الخصم ({settings.currency}):</span>
                 <input
                   type="number"
                   step="0.5"
-                  inputMode="decimal"
                   placeholder="0.00"
                   value={discountAmount || ''}
                   onChange={(e) => setDiscountAmount(Number(e.target.value))}
@@ -955,7 +968,7 @@ export default function SaleScreen({
                 />
               </div>
 
-              {/* Net Total Box (Wafeq Financial Card) */}
+              {/* Net Total Box */}
               <div className="flex justify-between items-center py-3 px-4 bg-slate-50 border border-slate-200/90 rounded-xl">
                 <div>
                   <span className="text-[11px] text-slate-500 block font-medium">المطلوب سداده:</span>
@@ -969,7 +982,7 @@ export default function SaleScreen({
                 </div>
               </div>
 
-              {/* Cash Paid Amount / Change */}
+              {/* Cash Paid Amount */}
               {saleType === 'cash' && (
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <div>
@@ -979,7 +992,6 @@ export default function SaleScreen({
                     <input
                       type="number"
                       step="1"
-                      inputMode="decimal"
                       placeholder={finalTotal.toFixed(2)}
                       value={paidAmount}
                       onChange={(e) => setPaidAmount(e.target.value)}
@@ -1018,7 +1030,7 @@ export default function SaleScreen({
               <div>
                 <input
                   type="text"
-                  placeholder="ملاحظات تظهر بالفاتورة قبل الطباعة (اختياري)..."
+                  placeholder="ملاحظات الفاتورة..."
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-primary-500 shadow-2xs"
@@ -1026,7 +1038,7 @@ export default function SaleScreen({
               </div>
             </div>
 
-            {/* Action Buttons: Primary Save & Print A4, Secondary, Reset */}
+            {/* Action Buttons: Save & Print, Save, Reset */}
             <div className="space-y-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
@@ -1037,7 +1049,7 @@ export default function SaleScreen({
                 }`}
               >
                 <Printer size={15} />
-                <span>{isSubmitting ? 'جاري الحفظ والترحيل...' : 'حفظ وطباعة الفاتورة A4'}</span>
+                <span>{isSubmitting ? 'جاري الحفظ والترحيل...' : 'حفظ وطباعة الفاتورة A4 / إيصال'}</span>
               </button>
 
               <div className="grid grid-cols-2 gap-2">
@@ -1060,7 +1072,7 @@ export default function SaleScreen({
                   className="py-2 px-3 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 font-semibold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
                 >
                   <RotateCcw size={14} />
-                  <span>تفريغ الفاتورة</span>
+                  <span>تفريغ السلة</span>
                 </button>
               </div>
             </div>
@@ -1071,353 +1083,109 @@ export default function SaleScreen({
 
       </div>
 
-      {/* Item Editor Modal / Drawer */}
-      {isItemEditorOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4">
-          <div className="w-full max-w-lg bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl p-5 max-h-[92vh] overflow-y-auto space-y-4 animate-in slide-in-from-bottom">
-            
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="font-black text-slate-900 text-sm">
-                {editingItemIndex !== null ? 'تعديل الصنف' : 'إضافة صنف للميزان'}
-              </h3>
-              <button 
-                onClick={() => setIsItemEditorOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold"
-              >
-                إغلاق ✕
-              </button>
-            </div>
+      {/* Item Custom Editor Modal */}
+      <Modal
+        isOpen={isItemEditorOpen}
+        onClose={() => setIsItemEditorOpen(false)}
+        title={editingItemIndex !== null ? 'تعديل سطر الفاتورة' : 'إضافة صنف مخصص'}
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">اسم الصنف</label>
+            <input
+              type="text"
+              value={activeItem.name}
+              onChange={(e) => setActiveItem(prev => ({ ...prev, name: e.target.value }))}
+              placeholder="اسم الصنف..."
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
+            />
+          </div>
 
-            {/* Live Stock Indicator for the active item */}
-            {(() => {
-              const matchedProd = products.find(p => 
-                (activeItem.productId && p.id === activeItem.productId) || 
-                (p.name.trim() === (activeItem.name || '').trim())
-              );
-              if (!matchedProd) return null;
-              const stock = Number(matchedProd.currentStockKg) || 0;
-              const isOut = stock <= 0;
-              const isLow = stock > 0 && stock <= 10;
-              return (
-                <div className={`p-2.5 rounded-xl text-xs flex items-center justify-between border ${
-                  isOut 
-                    ? 'bg-rose-50 text-rose-800 border-rose-200' 
-                    : isLow 
-                    ? 'bg-amber-50 text-amber-800 border-amber-200' 
-                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                }`}>
-                  <div className="flex items-center gap-2">
-                    <Package size={16} className={isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-emerald-600'} />
-                    <span className="font-bold">رصيد المخزن المسجل حالياً:</span>
-                    <strong className="font-mono text-sm">{stock.toFixed(2)} كجم</strong>
-                  </div>
-                  {isOut ? (
-                    <span className="text-[10px] font-bold px-2 py-0.5 bg-rose-200/80 text-rose-900 rounded-full">
-                      نفد المخزون
-                    </span>
-                  ) : isLow ? (
-                    <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-200/80 text-amber-900 rounded-full">
-                      قارَب على النفاد
-                    </span>
-                  ) : (
-                    <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-200/80 text-emerald-900 rounded-full">
-                      متوفر
-                    </span>
-                  )}
-                </div>
-              );
-            })()}
-
-            {/* Item Name & Unit */}
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">اسم الصنف</label>
-                <input
-                  type="text"
-                  value={activeItem.name}
-                  onChange={(e) => setActiveItem(prev => ({ ...prev, name: e.target.value }))}
-                  placeholder="مثال: بطاطا"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">نوع العبوة</label>
-                <select
-                  value={activeItem.unit}
-                  onChange={(e) => setActiveItem(prev => ({ ...prev, unit: e.target.value }))}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                >
-                  <option value="صندوق">صندوق</option>
-                  <option value="شوال">شوال</option>
-                  <option value="كرتونة">كرتونة</option>
-                  <option value="قفص">قفص</option>
-                  <option value="شبكة">شبكة</option>
-                  <option value="كيلو">كيلو مباشر</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Package count & Tare per unit */}
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">عدد العبوات</label>
-                <input
-                  type="number"
-                  min="1"
-                  inputMode="numeric"
-                  value={activeItem.packageCount}
-                  onChange={(e) => setActiveItem(prev => ({ ...prev, packageCount: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">وزن العبوة الفارغة (كجم)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  inputMode="decimal"
-                  value={activeItem.tarePerUnit}
-                  onChange={(e) => setActiveItem(prev => ({ ...prev, tarePerUnit: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                />
-                <span className="text-[10px] text-slate-400 mt-0.5 block">
-                  إجمالي الخصم: {(activeItem.packageCount * activeItem.tarePerUnit).toFixed(2)} كجم
-                </span>
-              </div>
-            </div>
-
-            {/* Gross Weight & Tally Calculator Button */}
+          <div className="grid grid-cols-2 gap-2">
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-bold text-slate-700">إجمالي الوزن القائم (كجم)</label>
-                <button
-                  type="button"
-                  onClick={() => setIsTallyModalOpen(true)}
-                  className="text-xs font-bold text-primary-600 hover:text-primary-700 bg-primary-50 hover:bg-primary-100/80 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors border border-primary-100 cursor-pointer"
-                >
-                  <Scale size={14} />
-                  <span>حاسبة قلّبات الميزان ({activeItem.weighings?.length || 0} وزنات)</span>
-                </button>
-              </div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">الوحدة</label>
+              <select
+                value={activeItem.unitType}
+                onChange={(e) => setActiveItem(prev => ({ 
+                  ...prev, 
+                  unitType: e.target.value,
+                  unitName: e.target.value === UNIT_TYPES.CARTON ? 'كرتونة' : e.target.value === UNIT_TYPES.PIECE ? 'حبة' : 'علبة'
+                }))}
+                className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value={UNIT_TYPES.PACK}>علبة (Pack)</option>
+                <option value={UNIT_TYPES.CARTON}>كرتونة (Carton)</option>
+                <option value={UNIT_TYPES.PIECE}>حبة سجارة (Piece)</option>
+              </select>
+            </div>
 
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">الكمية</label>
               <input
                 type="number"
-                step="0.1"
-                inputMode="decimal"
-                placeholder="أدخل الوزن الإجمالي على الميزان"
-                value={activeItem.grossWeight || ''}
-                onChange={(e) => setActiveItem(prev => ({ ...prev, grossWeight: Number(e.target.value) }))}
-                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-base font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                min="1"
+                value={activeItem.quantity}
+                onChange={(e) => setActiveItem(prev => ({ ...prev, quantity: Number(e.target.value) }))}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
               />
             </div>
+          </div>
 
-            {/* Price per Kg & Live Total calculation preview */}
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  سعر الكيلو ({settings.currency})
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  inputMode="decimal"
-                  value={activeItem.pricePerKg || ''}
-                  onChange={(e) => setActiveItem(prev => ({ ...prev, pricePerKg: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                />
-              </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">سعر الوحدة ({settings.currency})</label>
+            <input
+              type="number"
+              step="0.5"
+              value={activeItem.unitPrice}
+              onChange={(e) => setActiveItem(prev => ({ ...prev, unitPrice: Number(e.target.value) }))}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-primary-500"
+            />
+          </div>
 
-              <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex flex-col justify-center">
-                <span className="text-[10px] text-slate-500 font-semibold block">إجمالي الصنف التقديري:</span>
-                <span className="text-base font-bold font-mono text-navy-850">
-                  {(
-                    (weightMode === 'net_after_tare'
-                      ? Math.max(0, (Number(activeItem.grossWeight) || 0) - (Number(activeItem.packageCount) * Number(activeItem.tarePerUnit)))
-                      : (Number(activeItem.grossWeight) || 0)
-                    ) * (Number(activeItem.pricePerKg) || 0)
-                  ).toFixed(2)} {settings.currency}
-                </span>
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsItemEditorOpen(false)}
-                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl cursor-pointer"
-              >
-                إلغاء
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveItem}
-                className="flex-2 py-3 bg-primary-500 hover:bg-primary-600 text-white font-bold text-sm rounded-xl shadow-soft cursor-pointer"
-              >
-                اعتماد الصنف بالفاتورة
-              </button>
-            </div>
-
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsItemEditorOpen(false)}
+            >
+              إلغاء
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={handleSaveItemModal}
+            >
+              تثبيت في السلة
+            </Button>
           </div>
         </div>
-      )}
+      </Modal>
 
-      {/* Mobile Sticky Quick-Checkout Floating Bar (Docked above BottomNav) */}
-      {(globalThis.document?.body ? createPortal : (content) => content)(
-        <div className="lg:hidden fixed bottom-[calc(64px+env(safe-area-inset-bottom,0px))] inset-x-0 z-30 pointer-events-none">
-          <div className="max-w-lg mx-auto bg-white text-navy-850 p-3 shadow-soft border-t border-slate-200 pointer-events-auto flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-col min-w-0">
-              <span className="text-xs text-slate-600 font-medium truncate">
-                {cartItems.length} {cartItems.length === 1 ? 'صنف' : 'أصناف'} • {totalPackages} عبوة ({formatWeight(totalNetWeight)})
-              </span>
-              <div className="flex items-baseline gap-1">
-                <span className="text-navy-850 font-bold font-mono text-2xl tracking-tight">
-                  {finalTotal.toFixed(2)}
-                </span>
-                <span className="text-xs text-slate-600 font-medium">{settings.currency}</span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  const el = document.getElementById('payment-section');
-                  if (el) el.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="min-h-12 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl flex items-center gap-1 border border-slate-200 transition-colors cursor-pointer"
-              >
-                <span>الدفع</span>
-                <ChevronDown size={14} />
-              </button>
-
-              <button
-                type="button"
-                disabled={isSubmitting || cartItems.length === 0}
-                onClick={() => handleSaveInvoice(true)}
-                className="min-h-12 px-3.5 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Printer size={15} />
-                <span>{isSubmitting ? 'جاري الحفظ...' : 'حفظ وطباعة'}</span>
-              </button>
-            </div>
-            <button type="button" disabled={isSubmitting || cartItems.length === 0}
-              onClick={() => handleSaveInvoice(false)}
-              className="w-full min-h-11 text-sm font-semibold text-primary-700 bg-primary-50 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
-              حفظ بدون طباعة
-            </button>
-          </div>
-        </div>
-      , globalThis.document?.body)}
-
-      {/* Scale Multi-Tally Modal */}
-      <WeightTallyModal
-        isOpen={isTallyModalOpen}
-        onClose={() => setIsTallyModalOpen(false)}
-        itemName={activeItem.name}
-        initialWeighings={activeItem.weighings || []}
-        onApply={(totalGross, weighingsList) => {
-          setActiveItem(prev => ({
-            ...prev,
-            grossWeight: totalGross,
-            weighings: weighingsList
-          }));
-        }}
-      />
-
-      {/* Out of Stock Policy Modal / Cashier Guidance Dialog */}
+      {/* Out of Stock Alert Modal */}
       {outOfStockAlert && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
-            {/* Header with Warning Accent */}
-            <div className="bg-amber-600 text-white p-5 flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
-                <AlertTriangle size={28} className="text-white" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold leading-tight">تنبيه: رصيد الصنف لا يكفي بالمخزن!</h3>
-                <p className="text-xs text-amber-100 font-normal mt-0.5">وضع الضبط المحاسبي الصارم مفعل لمنع البيع الوهمي</p>
-              </div>
+        <Modal
+          isOpen={Boolean(outOfStockAlert)}
+          onClose={() => setOutOfStockAlert(null)}
+          title="تنبيه نفاد المخزون"
+        >
+          <div className="space-y-3">
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs leading-relaxed">
+              الكمية المطلوبة من الصنف <strong>({outOfStockAlert.productName})</strong> هي <strong>{outOfStockAlert.requestedWeight}</strong> علبة، بينما الرصيد الفعلي المتوفر بالمخزن هو <strong>{outOfStockAlert.currentStock}</strong> علبة فقط.
             </div>
-
-            {/* Body */}
-            <div className="p-5 space-y-4 text-xs">
-              {/* Product and Stock details card */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
-                  <span className="text-slate-500 font-medium">اسم الصنف:</span>
-                  <span className="text-sm font-bold text-navy-850">{outOfStockAlert.productName}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500 font-medium">الرصيد المتوفر بالمخزن:</span>
-                  <span className="font-bold font-mono text-rose-600 text-sm">
-                    {outOfStockAlert.currentStock.toFixed(2)} كجم
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500 font-medium">الوزن المطلوب بيعه:</span>
-                  <span className="font-bold font-mono text-navy-850 text-sm">
-                    {outOfStockAlert.requestedWeight.toFixed(2)} كجم
-                  </span>
-                </div>
-              </div>
-
-              {/* Explanatory Guide */}
-              <div className="bg-primary-50/70 border border-primary-100 rounded-2xl p-3.5 space-y-2 text-navy-850">
-                <div className="flex items-center gap-1.5 text-primary-700 font-bold">
-                  <span>💡</span>
-                  <span>توجيه وإرشاد للبائع / الكاشير:</span>
-                </div>
-                <p className="text-[11px] leading-relaxed text-slate-700 font-normal">
-                  إذا كانت هناك <strong>شحنة بضاعة طازجة وصلت للمحل للتو</strong> وترغب في بيعها للزبون فوراً قبل إدخال فاتورة الشراء والتوريد من المورد دفترياً، يمكنك السماح بذلك من الإعدادات.
-                </p>
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  عند تفعيل خيار <strong>«السماح بالبيع عند نفاد المخزون»</strong>، سيتيح لك النظام البيع فوراً وسيتحول الرصيد بالسالب مؤقتاً لحين تسجيل فاتورة المورد لتسوية الحساب تلقائياً.
-                </p>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col gap-2">
-              <button
+            <div className="flex justify-end">
+              <Button
                 type="button"
-                onClick={() => {
-                  setOutOfStockAlert(null);
-                  if (onOpenSettings) onOpenSettings();
-                }}
-                className="w-full py-3 bg-navy-850 hover:bg-navy-900 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer"
+                variant="primary"
+                size="sm"
+                onClick={() => setOutOfStockAlert(null)}
               >
-                <SettingsIcon size={16} className="text-primary-300" />
-                <span>الانتقال للإعدادات وتفعيل السماح بالبيع فوراً</span>
-              </button>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOutOfStockAlert(null);
-                    if (onNavigate) onNavigate('purchases');
-                  }}
-                  className="py-2.5 bg-primary-500 hover:bg-primary-600 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                >
-                  <Package size={15} />
-                  <span>تسجيل فاتورة توريد</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setOutOfStockAlert(null)}
-                  className="py-2.5 bg-white border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
-                >
-                  إلغاء / حسناً
-                </button>
-              </div>
+                حسناً، فهمت
+              </Button>
             </div>
-
           </div>
-        </div>
+        </Modal>
       )}
 
     </div>

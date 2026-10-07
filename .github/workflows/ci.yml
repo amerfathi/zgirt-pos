@@ -1,4 +1,4 @@
-name: ZGIRT CI/CD Pipeline
+﻿name: ZGIRT CI/CD Pipeline
 
 on:
   push:
@@ -19,17 +19,20 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Install Monorepo Dependencies
+      - name: Install Dependencies
         run: npm ci || npm install
 
-      - name: Execute Domain & Accounting Consistency Tests
+      - name: Security Regression Tests
+        run: npm run test:security
+
+      - name: Accounting & Consistency Tests
         run: npm run test:accounting
 
-      - name: Execute Causal Sync & Conflict Policy Tests
-        run: npm run test:sync
+      - name: Causal Sync & Conflict Tests
+        run: node --test tests/conflict-review-ui.test.mjs tests/sync-durable.test.mjs tests/cash-shift-engine.test.mjs tests/cash-movement.test.mjs
 
-      - name: Execute Multi-Tenant Isolation Tests
-        run: npm run test:tenant
+      - name: Tenant & Branch Isolation Tests
+        run: node --test tests/branch-isolation.test.mjs tests/branch-store.test.mjs
 
-      - name: Verify Web Production Build
-        run: npm --workspace=apps/web run build
+      - name: Verify Web Production Bundle
+        run: npm run build
